@@ -26,7 +26,7 @@ jobs:
         with:
           node-version: 20
 
-      - name: Generate data/tracks.json & images.json
+      - name: Generate data/tracks.json & images.json (with encodeURI + repo base)
         run: |
           set -euo pipefail
           mkdir -p data
@@ -36,28 +36,27 @@ jobs:
           import process from 'node:process';
 
           // ---- GitHub Pages base path ----
-          const repoFull = process.env.GITHUB_REPOSITORY || '';          // e.g. user/Touhou-music-generator
-          const repoName = repoFull.split('/')[1] || '';
+          // user/repo 取 repo 名；個人頁倉庫如 user.github.io 則當作根目錄 "/"
+          const repoFull = process.env.GITHUB_REPOSITORY || '';
+          const repoName = (repoFull.split('/')[1] || '').trim();
           const pagesBase = repoName.endsWith('.github.io') ? '/' : `/${repoName}/`;
 
           const musicRoot = path.join(process.cwd(),'music');
           const dataDir   = path.join(process.cwd(),'data');
           const exts = new Set(['.mp3','.ogg','.wav','.m4a','.flac']);
 
+          // 去掉前導編號（含空白/全形符號）
           const stripLeadingIndex = (s) => s.replace(/^\s*\d+\s*[.\-＿．]?\s*/u,'').trim();
 
           function walk(dir){
             let out = [];
             if (!fs.existsSync(dir)) return out;
-            for (const name of fs.readdirSync(dir)) {
+            for (const name of fs.readdirSync(dir)){
               if (name.startsWith('.')) continue;
               const p = path.join(dir, name);
               const st = fs.statSync(p);
               if (st.isDirectory()) out = out.concat(walk(p));
-              else {
-                const ext = path.extname(name).toLowerCase();
-                if (exts.has(ext)) out.push(p);
-              }
+              else if (exts.has(path.extname(name).toLowerCase())) out.push(p);
             }
             return out;
           }
@@ -66,43 +65,46 @@ jobs:
           let files = [];
           if (fs.existsSync(musicRoot)) files = walk(musicRoot);
 
-          // 相對路徑 → 帶上 Pages base（專案頁會是 /repo/...；個人頁是 /...）
           const tracks = files.map(abs => {
+            // 相對路徑（posix 斜線）
             const rel = path.posix.join('music', path.relative(musicRoot, abs).split(path.sep).join('/'));
-            const fileURL = pagesBase + rel;                 // 這行是關鍵：補上 base 路徑
+
+            // 1) 先補 Pages base，確保在 repo 子路徑上可用
+            const rawURL = pagesBase + rel;
+
+            // 2) encodeURI：處理空格/非 ASCII（保留 / : ? # 等必要符號）
+            const encodedURL = encodeURI(rawURL);
+
+            // 3) title：去掉副檔名與前導編號
             const base = stripLeadingIndex(path.basename(rel).replace(/\.[^.]+$/,''));
-            // 不需要 artist；title 去除前綴編號
-            return { file: fileURL, title: base, artist: "" };
+
+            return { file: encodedURL, title: base, artist: "" };
           });
 
           fs.writeFileSync(path.join(dataDir,'tracks.json'), JSON.stringify(tracks, null, 2));
           console.log(`✅ tracks.json generated: ${tracks.length} tracks`);
 
-          // ---- images.json（簡化：touhou 一組 tags；可再擴充）----
-          const tags = new Set(['touhou']);
+          // ---- images.json（簡版：固定 'touhou'；可再擴充）----
           const images = {};
-          for (const tag of tags) {
-            try {
-              const url = `https://danbooru.donmai.us/posts.json?limit=30&tags=${encodeURIComponent(tag + ' rating:safe order:rank')}`;
-              const res = await fetch(url, { headers: { 'User-Agent': 'GitHubActions/1.0 (+pages)' }});
-              if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
-              const arr = await res.json();
-              const seen = new Set(); const list = [];
-              for (const p of arr) {
-                const u = p.large_file_url || p.file_url;
-                if (!u || p.rating !== 's') continue;
-                const abs = u.startsWith('http') ? u : `https://danbooru.donmai.us${u}`;
-                if (seen.has(abs)) continue;
-                seen.add(abs);
-                list.push({ url: abs, source: `post:${p.id}` });
-              }
-              images[tag] = list;
-              console.log(`🖼️  ${tag}: ${list.length} images`);
-              await new Promise(r => setTimeout(r, 250));
-            } catch (e) {
-              console.log('⚠️  image fetch failed for', tag, e.message);
-              images[tag] = images[tag] || [];
+          try {
+            const url = `https://danbooru.donmai.us/posts.json?limit=30&tags=${encodeURIComponent('touhou rating:safe order:rank')}`;
+            const res = await fetch(url, { headers: { 'User-Agent': 'GitHubActions/1.0 (+pages)' }});
+            if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
+            const arr = await res.json();
+            const seen = new Set(); const list = [];
+            for (const p of arr) {
+              const u = p.large_file_url || p.file_url;
+              if (!u || p.rating !== 's') continue;
+              const abs = u.startsWith('http') ? u : `https://danbooru.donmai.us${u}`;
+              if (seen.has(abs)) continue;
+              seen.add(abs);
+              list.push({ url: abs, source: `post:${p.id}` });
             }
+            images['touhou'] = list;
+            console.log(`🖼️ touhou: ${list.length} images`);
+          } catch (e) {
+            console.log('⚠️ images fetch failed:', e.message);
+            images['touhou'] = [];
           }
           fs.writeFileSync(path.join(dataDir,'images.json'), JSON.stringify(images, null, 2));
           console.log('✅ images.json generated');
@@ -126,11 +128,10 @@ jobs:
             --exclude '.git' \
             --exclude '.github' \
             ./ dist/
-          # 確保 data/ 一定存在於 dist
-          test -d dist/data || mkdir -p dist/data
+          # 確保 data 一定被帶進部署
+          mkdir -p dist/data
           cp -f data/tracks.json dist/data/tracks.json
           cp -f data/images.json dist/data/images.json
-          # 可選：若你需要保留 README.md 也一起帶上
           [ -f data/README.md ] && cp -f data/README.md dist/data/README.md || true
 
       - name: Configure Pages

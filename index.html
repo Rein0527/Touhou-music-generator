@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Touhou Player Rev K</title>
+  <title>Touhou music generator</title>
   <link rel="stylesheet" href="assets/css/style.css" />
 </head>
 <body>
@@ -17,13 +17,16 @@
     <div class="stage" id="stage">
       <canvas id="viz" width="1200" height="1200" aria-label="視覺化畫布"></canvas>
 
-      <!-- 進度條 -->
-      <div class="scrub">
-        <div class="time t-left"><span id="curTime">0:00</span></div>
-        <div id="progressBar" class="bar-outer" role="slider" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" aria-label="播放進度">
-          <div id="progressFill" class="bar-inner"></div>
+      <!-- 下方曲目 + 進度條 -->
+      <div class="nowplaying">
+        <div id="trackTitle" class="title">—</div>
+        <div class="scrub">
+          <div class="time t-left"><span id="curTime">0:00</span></div>
+          <div id="progressBar" class="bar-outer" role="slider" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" aria-label="播放進度">
+            <div id="progressFill" class="bar-inner"></div>
+          </div>
+          <div class="time t-right"><span id="durTime">0:00</span></div>
         </div>
-        <div class="time t-right"><span id="durTime">0:00</span></div>
       </div>
     </div>
 
@@ -36,7 +39,7 @@
       <ul id="playlistItems"></ul>
     </div>
 
-    <!-- 設定（右下角浮窗） -->
+    <!-- 設定（右下角小浮窗） -->
     <div id="settingsPanel" class="settings-flyout">
       <div class="settings-header">
         <h2>設定</h2>
@@ -70,8 +73,30 @@
         </label>
 
         <label class="row">
+          <span class="sub">Rating</span>
+          <select id="bgRating" class="input">
+            <option value="safe">safe</option>
+            <option value="sensitive">sensitive</option>
+            <option value="questionable">questionable</option>
+          </select>
+        </label>
+
+        <label class="row">
           <span class="sub">搜尋標籤</span>
-          <input id="bgTag" class="input" type="text" placeholder="例如：touhou rating:safe" />
+          <input id="bgTag" class="input" type="text" placeholder="例如：touhou" />
+        </label>
+
+        <label class="row">
+          <span class="sub">填充模式</span>
+          <select id="bgFit" class="input">
+            <option value="cover">cover（鋪滿，可能裁切）</option>
+            <option value="contain">contain（完整顯示，可能留邊）</option>
+          </select>
+        </label>
+
+        <label class="row">
+          <span class="sub">自動換圖（秒）</span>
+          <input id="bgInterval" class="input" type="number" min="0" step="1" placeholder="0=停用" />
         </label>
 
         <div class="actions">
@@ -92,7 +117,18 @@
         <button class="btn icon" id="next" title="下一首">⏭</button>
       </div>
       <div class="bar-right">
-        <button class="btn icon" id="settingsBtn" title="設定">⚙</button>
+
+		<!-- 下載目前背景圖 -->
+		<button class="btn icon" id="dlBgBtn" title="下載背景圖片">
+		  <svg xmlns="http://www.w3.org/2000/svg" 
+			   viewBox="0 0 24 24" 
+			   class="icon-download" 
+			   fill="white">
+			<path d="M5 20h14v-2H5v2zM12 2v12l4-4h-3V2h-2v8H8l4 4z"/>
+		  </svg>
+		</button>
+		<!-- 設定按鈕 -->
+		<button class="btn icon" id="settingsBtn" title="設定">⚙</button>	  
         <div class="vol">
           <button id="muteBtn" class="btn icon" title="靜音/恢復">🔊</button>
           <input id="volume" type="range" min="0" max="1" step="0.01" value="1" />

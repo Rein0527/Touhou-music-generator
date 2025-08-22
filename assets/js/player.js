@@ -1,4 +1,4 @@
-// 播放核心 + 資料載入 + queue 管理 + repeat/shuffle + 背景圖管理
+// 播放核心 + 資料載入 + queue 管理 + repeat/shuffle + Danbooru 背景 + 自動換圖 + 清晰背景
 export const STATE = {
   tracks: [],
   queue: [],
@@ -7,9 +7,15 @@ export const STATE = {
   shuffle: false,
   lastVolume: 1,
 
-  // 背景圖
+  // 背景圖設定（供設定面板讀寫）
   bgEnabled: true,
-  bgTag: "touhou rating:safe",
+  bgTag: "touhou",      // 預設主標籤（使用者可改）
+  bgRating: "safe",     // safe | sensitive | questionable（safe 會映射到 rating:general）
+  bgFit: "contain",     // 預設 contain
+  bgIntervalSec: 10,    // 預設 10 秒自動換圖（0=停用）
+
+  // 目前已載入的背景圖（供下載）
+  bgSrc: "",
 };
 
 const audio = document.getElementById("audio");
@@ -22,14 +28,14 @@ function detectBasePath() {
 }
 const PAGE_BASE = detectBasePath();
 
-// 將 tracks.json 的 file 正規化
+// 正規化檔案路徑
 function resolveFile(src) {
   if (/^(https?:)?\/\//i.test(src)) return src;
-  if (src.startsWith('/')) return src;   // 如果 workflow 已補過 /repo/
+  if (src.startsWith('/')) return src;
   return PAGE_BASE + src.replace(/^\.?\//,'');
 }
 
-// 取得目前曲目
+// 目前曲目
 export function currentTrack() {
   const gi = STATE.queue[STATE.qIndex];
   return STATE.tracks[gi];
@@ -75,7 +81,7 @@ export async function playCurrent() {
   try {
     await audio.play();
     updateNowPlayingUI(true);
-    if (STATE.bgEnabled) updateDanbooruBackground(t);
+    if (STATE.bgEnabled) updateDanbooruBackground(t, /*force*/ false);
   } catch (e) {
     console.warn("audio play error:", e);
   }
@@ -114,15 +120,11 @@ export function setVolume(v) {
   updateMuteIcon();
 }
 export function toggleMute() {
-  if (audio.volume > 0) {
-    STATE.lastVolume = audio.volume;
-    setVolume(0);
-  } else {
-    setVolume(STATE.lastVolume || 1);
-  }
+  if (audio.volume > 0) { STATE.lastVolume = audio.volume; setVolume(0); }
+  else { setVolume(STATE.lastVolume || 1); }
 }
 
-// ---- UI 更新（播放鍵 / 播放中高亮 / 時間） ----
+// ---- UI 狀態（按鈕圖示、播放清單高亮、標題）----
 export function updateNowPlayingUI(isPlaying = !audio.paused) {
   const playBtn = document.getElementById("play");
   if (playBtn) playBtn.textContent = isPlaying ? "⏸" : "▶";
@@ -136,7 +138,9 @@ export function updateNowPlayingUI(isPlaying = !audio.paused) {
     if (active) active.classList.add("active");
   }
 
-  // 時間 / 進度（由 ui.js 讀 audio 做顯示與拖曳，此處不處理）
+  const titleEl = document.getElementById("trackTitle");
+  const t = currentTrack();
+  if (titleEl) titleEl.textContent = t ? (t.title || (t.file.split("/").pop() || "—")) : "—";
 }
 export function updateMuteIcon() {
   const muteBtn = document.getElementById("muteBtn");
@@ -148,36 +152,63 @@ export async function initPlayer() {
   await loadTracks();
   setVolume(1);
   updateNowPlayingUI(false);
+
+  // 預設背景參數
+  applyBgFit();    // contain
+  applyBgGlass();  // 顯示圖片時關閉模糊
+  setupBgAutoRotate();
   if (STATE.bgEnabled) updateDanbooruBackground();
 }
 
-/* ---------------- Danbooru 背景 ---------------- */
+/* ===================== 背景（Danbooru） ===================== */
+
 const bg = document.getElementById("bg");
 const bgNext = document.getElementById("bgNext");
 
+// rating 對應（safe → general）
+function ratingToken(v){
+  const map = { safe: "general", sensitive: "sensitive", questionable: "questionable" };
+  return map[v] || "general";
+}
+
+// ✅ 只產生「<單一主 tag> + rating」，主 tag 由使用者輸入，預設 touhou
+function buildTags() {
+  const baseRaw = (STATE.bgTag || "touhou").trim();
+  // 把空白轉底線，確保只是一個 Danbooru tag（避免多個 tag 觸發 422）
+  const base = baseRaw.replace(/\s+/g, "_") || "touhou";
+  const rating = `rating:${ratingToken(STATE.bgRating)}`;
+  // 僅兩個 tag，並移除任何 random:* 殘留
+  return `${base} ${rating}`.replace(/\brandom:\S+\b/gi, "").trim();
+}
+
+// ✅ 使用 random=true 當查詢參數（不要用 random:1 當成 tag）
 async function fetchDanbooruUrl(tags) {
   const qs = `https://danbooru.donmai.us/posts.json?limit=1&random=true&tags=${encodeURIComponent(tags)}`;
   const res = await fetch(qs, { cache: "no-store" });
   if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
   const arr = await res.json();
   const p = arr && arr[0];
-  // 優先使用大圖，其次原圖，再次預覽
-  const src = p?.large_file_url || p?.file_url || p?.preview_file_url || p?.source;
-  return src ? (src.startsWith("http") ? src : `https://danbooru.donmai.us${src}`) : "";
+  const candidate = p?.large_file_url || p?.file_url || p?.preview_file_url || p?.source;
+  const src = candidate ? (String(candidate).startsWith("http") ? candidate : `https://danbooru.donmai.us${candidate}`) : "";
+  return src;
 }
 
 let bgSwapping = false;
-export async function updateDanbooruBackground(track) {
-  if (!STATE.bgEnabled || bgSwapping) return;
+// force=true 可強制立即換（按鈕「換一張」）
+export async function updateDanbooruBackground(track, force = false) {
+  if (!STATE.bgEnabled) return;
+  if (bgSwapping && !force) return;
+
   bgSwapping = true;
   try {
-    // 以 tag 為主；如果有曲名，嘗試加上關鍵字以提高關聯度
-    let tag = STATE.bgTag || "touhou rating:safe";
-    if (track?.title) tag = `${track.title.replace(/\s+/g,"_")} ${tag}`;
-    let src = await fetchDanbooruUrl(tag);
-    if (!src) src = await fetchDanbooruUrl(STATE.bgTag || "touhou rating:safe");
+    const tags = buildTags(); // 依目前設定產生（預設 touhou + rating；使用者可改 base）
+    let src = await fetchDanbooruUrl(tags);
+
+    // 備援：仍然用同一組 <base + rating> 再試一次
+    if (!src) src = await fetchDanbooruUrl(buildTags());
 
     if (src) {
+      STATE.bgSrc = src; // ✅ 記住目前背景圖（供下載）
       bgNext.style.backgroundImage = `url("${src}")`;
       bgNext.style.opacity = "1";
       bg.style.opacity = "0";
@@ -188,7 +219,7 @@ export async function updateDanbooruBackground(track) {
         bgSwapping = false;
       }, 850);
     } else {
-      bgSwapping = false; // 沒有取到就略過
+      bgSwapping = false;
     }
   } catch (e) {
     console.warn("Danbooru 取圖失敗：", e);
@@ -196,10 +227,93 @@ export async function updateDanbooruBackground(track) {
   }
 }
 
-// 提供 UI 存取設定
-export function setBgEnabled(v){ STATE.bgEnabled = !!v; }
-export function setBgTag(tag){ STATE.bgTag = String(tag || "").trim() || "touhou rating:safe"; }
-export function getBgSettings(){ return { enabled: STATE.bgEnabled, tag: STATE.bgTag }; }
+/* ---- 背景填充/玻璃化控制 ---- */
+function applyBgFit() {
+  document.documentElement.style.setProperty('--bg-fit', STATE.bgFit === 'contain' ? 'contain' : 'cover');
+}
+function applyBgGlass() {
+  // 顯示圖片：遮罩透明、blur=0；不顯示：遮罩恢復、blur=8px
+  document.documentElement.style.setProperty('--bg-dim', STATE.bgEnabled ? '0' : '1');
+  document.documentElement.style.setProperty('--bg-blur', STATE.bgEnabled ? '0px' : '8px');
+}
 
-// 匯出 audio 供 ui.js 使用
+/* ---- 自動換圖排程（頁面在前景時才輪換） ---- */
+let bgTimer = null;
+function clearBgTimer(){ if(bgTimer){ clearInterval(bgTimer); bgTimer = null; } }
+
+// ✅ 只有在播放中才會跑自動換圖
+function isPlaying() { return !audio.paused && !audio.ended; }
+
+function maybeKickRotate() {
+  clearBgTimer();
+  const sec = Number(STATE.bgIntervalSec) || 0;
+  if (STATE.bgEnabled && sec > 0 && !document.hidden && isPlaying()) {
+    bgTimer = setInterval(() => updateDanbooruBackground(currentTrack()), sec * 1000);
+  }
+}
+function setupBgAutoRotate() {
+  maybeKickRotate();
+
+  // 分頁前後景切換
+  document.addEventListener('visibilitychange', () => {
+    // 回到前景且啟用背景且「正在播放」時，強制刷新一次
+    if (!document.hidden && STATE.bgEnabled && isPlaying()) {
+      updateDanbooruBackground(currentTrack(), /*force*/ true);
+    }
+    maybeKickRotate();
+  });
+
+  // 播放狀態變化 → 控制輪播
+  audio.addEventListener('play',  () => { maybeKickRotate(); });
+  audio.addEventListener('pause', () => { maybeKickRotate(); });
+  audio.addEventListener('ended', () => { maybeKickRotate(); });
+}
+
+/* ---- 設定存取（給 ui.js 用） ---- */
+export function setBgEnabled(v){ STATE.bgEnabled = !!v; applyBgGlass(); if (v) updateDanbooruBackground(currentTrack(), true); }
+export function setBgTag(tag){ STATE.bgTag = String(tag || "").trim() || "touhou"; } // 使用者可改；buildTags 會處理成單一 tag
+export function setBgRating(r){ STATE.bgRating = (["safe","sensitive","questionable"].includes(r)) ? r : "safe"; }
+export function setBgFit(v){ STATE.bgFit = (v === "contain") ? "contain" : "cover"; applyBgFit(); }
+export function setBgInterval(sec){ STATE.bgIntervalSec = Math.max(0, Number(sec) || 0); maybeKickRotate(); }
+export function getBgSettings(){
+  return {
+    enabled: STATE.bgEnabled,
+    tag: STATE.bgTag,
+    rating: STATE.bgRating,
+    fit: STATE.bgFit,
+    interval: STATE.bgIntervalSec,
+  };
+}
+
+// ✅ 下載目前背景圖
+export async function downloadCurrentBg() {
+  try {
+    const src = STATE.bgSrc;
+    if (!src) throw new Error("目前沒有背景圖可以下載");
+
+    // 產生檔名
+    const url = new URL(src, window.location.href);
+    const nameGuess = url.pathname.split("/").pop() || "danbooru.jpg";
+    const fileName = nameGuess.split("?")[0] || "danbooru.jpg";
+
+    // 優先以 blob 下載（跨網域更穩）
+    const res = await fetch(src, { mode: "cors" });
+    if (!res.ok) throw new Error(`下載失敗：${res.status} ${res.statusText}`);
+    const blob = await res.blob();
+
+    const a = document.createElement("a");
+    const objectUrl = URL.createObjectURL(blob);
+    a.href = objectUrl;
+    a.download = fileName;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(objectUrl);
+  } catch (err) {
+    console.warn(err);
+    // CORS 報錯時退而求其次：直接開新視窗，讓使用者另存
+    if (STATE.bgSrc) window.open(STATE.bgSrc, "_blank");
+  }
+}
+
 export { audio, PAGE_BASE };

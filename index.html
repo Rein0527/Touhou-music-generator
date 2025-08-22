@@ -3,11 +3,12 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Touhou Player Rev I</title>
+  <title>Touhou Player Rev J</title>
   <link rel="stylesheet" href="assets/css/style.css" />
 </head>
 <body>
   <div class="app" id="app">
+    <!-- 背景 -->
     <div class="bg" id="bg"></div>
     <div class="bg-next" id="bgNext"></div>
     <div class="bg-dim"></div>
@@ -17,20 +18,20 @@
       <canvas id="viz" width="1200" height="1200"></canvas>
     </div>
 
-    <!-- 播放清單面板 -->
+    <!-- 播放清單（左側抽屜） -->
     <div id="playlistPanel" class="playlist-panel">
       <div class="playlist-header">
         <h2>播放清單</h2>
-        <button id="closePlaylist" class="btn icon">✕</button>
+        <button id="closePlaylist" class="btn icon" aria-label="關閉">✕</button>
       </div>
       <ul id="playlistItems"></ul>
     </div>
 
-    <!-- 設定面板 -->
+    <!-- 設定（右側抽屜） -->
     <div id="settingsPanel" class="settings-panel">
       <div class="settings-header">
         <h2>設定</h2>
-        <button id="closeSettings" class="btn icon">✕</button>
+        <button id="closeSettings" class="btn icon" aria-label="關閉">✕</button>
       </div>
       <ul>
         <li>
@@ -53,28 +54,28 @@
     <!-- 底部控制列 -->
     <div class="bar">
       <div class="bar-left">
-        <button class="btn icon" id="playlistBtn">☰</button>
+        <button class="btn icon" id="playlistBtn" title="播放清單">☰</button>
       </div>
-
       <div class="bar-center">
-        <button class="btn icon" id="prev">⏮</button>
-        <button class="btn icon" id="play">▶</button>
-        <button class="btn icon" id="next">⏭</button>
+        <button class="btn icon" id="prev" title="上一首">⏮</button>
+        <button class="btn icon" id="play" title="播放/暫停">▶</button>
+        <button class="btn icon" id="next" title="下一首">⏭</button>
       </div>
-
       <div class="bar-right">
-        <button class="btn icon" id="settingsBtn">⚙</button>
+        <button class="btn icon" id="settingsBtn" title="設定">⚙</button>
         <div class="vol">
-          <button id="muteBtn" class="btn icon">🔊</button>
+          <button id="muteBtn" class="btn icon" title="靜音/恢復">🔊</button>
           <input id="volume" type="range" min="0" max="1" step="0.01" value="1" />
         </div>
       </div>
     </div>
   </div>
 
-  <audio id="audio"></audio>
-  <script src="assets/js/player.js"></script>
-  <script src="assets/js/ui.js"></script>
-  <script src="assets/js/viz.js"></script>
+  <audio id="audio" crossorigin="anonymous"></audio>
+
+  <!-- 必須是 ES modules -->
+  <script type="module" src="assets/js/player.js"></script>
+  <script type="module" src="assets/js/ui.js"></script>
+  <script type="module" src="assets/js/viz.js"></script>
 </body>
 </html>

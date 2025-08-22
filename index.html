@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Touhou Player Rev J</title>
+  <title>Touhou Player Rev K</title>
   <link rel="stylesheet" href="assets/css/style.css" />
 </head>
 <body>
@@ -15,7 +15,16 @@
 
     <!-- 舞台 -->
     <div class="stage" id="stage">
-      <canvas id="viz" width="1200" height="1200"></canvas>
+      <canvas id="viz" width="1200" height="1200" aria-label="視覺化畫布"></canvas>
+
+      <!-- 進度條 -->
+      <div class="scrub">
+        <div class="time t-left"><span id="curTime">0:00</span></div>
+        <div id="progressBar" class="bar-outer" role="slider" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" aria-label="播放進度">
+          <div id="progressFill" class="bar-inner"></div>
+        </div>
+        <div class="time t-right"><span id="durTime">0:00</span></div>
+      </div>
     </div>
 
     <!-- 播放清單（左側抽屜） -->
@@ -27,28 +36,49 @@
       <ul id="playlistItems"></ul>
     </div>
 
-    <!-- 設定（右側抽屜） -->
-    <div id="settingsPanel" class="settings-panel">
+    <!-- 設定（右下角浮窗） -->
+    <div id="settingsPanel" class="settings-flyout">
       <div class="settings-header">
         <h2>設定</h2>
-        <button id="closeSettings" class="btn icon" aria-label="關閉">✕</button>
+        <button id="closeSettings" class="btn icon sm" aria-label="關閉">✕</button>
       </div>
-      <ul>
-        <li>
-          <span>循環播放</span>
+      <div class="settings-body">
+        <label class="row">
+          <span>同一首循環</span>
           <label class="switch">
-            <input type="checkbox" id="toggleRepeat">
+            <input type="checkbox" id="toggleRepeatOne">
             <span class="slider"></span>
           </label>
-        </li>
-        <li>
+        </label>
+
+        <label class="row">
           <span>隨機播放</span>
           <label class="switch">
             <input type="checkbox" id="toggleShuffle">
             <span class="slider"></span>
           </label>
-        </li>
-      </ul>
+        </label>
+
+        <div class="sep"></div>
+
+        <label class="row">
+          <span>背景圖片（Danbooru）</span>
+          <label class="switch">
+            <input type="checkbox" id="toggleBg">
+            <span class="slider"></span>
+          </label>
+        </label>
+
+        <label class="row">
+          <span class="sub">搜尋標籤</span>
+          <input id="bgTag" class="input" type="text" placeholder="例如：touhou rating:safe" />
+        </label>
+
+        <div class="actions">
+          <button id="bgRefresh" class="btn">換一張</button>
+          <button id="saveSettings" class="btn ghost">套用</button>
+        </div>
+      </div>
     </div>
 
     <!-- 底部控制列 -->

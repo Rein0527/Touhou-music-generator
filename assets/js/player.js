@@ -1,4 +1,4 @@
-// 播放核心 + 資料載入 + queue 管理 + repeat/shuffle
+// 播放核心 + 資料載入 + queue 管理 + repeat/shuffle + 背景圖管理
 export const STATE = {
   tracks: [],
   queue: [],
@@ -6,29 +6,33 @@ export const STATE = {
   repeatMode: "off",   // "off" | "one" | "all"
   shuffle: false,
   lastVolume: 1,
+
+  // 背景圖
+  bgEnabled: true,
+  bgTag: "touhou rating:safe",
 };
 
 const audio = document.getElementById("audio");
 
 // 依部署環境推導 base path（個人頁 "/"；專案頁 "/repo/"）
 function detectBasePath() {
-  // e.g. /Touhou-music-generator/ 或 /
   const p = window.location.pathname;
-  // 若是 index.html 結尾，去掉它
   const base = p.replace(/index\.html$/,'');
-  // 確保以 / 結尾
   return base.endsWith('/') ? base : base + '/';
 }
 const PAGE_BASE = detectBasePath();
 
-// 將 tracks.json 的 file 正規化：
-// - 以 http(s) 或 // 開頭 → 原樣
-// - 以 / 開頭 → 視為絕對（保持）
-// - 其它相對路徑（如 music/xxx）→ 加上 PAGE_BASE
+// 將 tracks.json 的 file 正規化
 function resolveFile(src) {
   if (/^(https?:)?\/\//i.test(src)) return src;
-  if (src.startsWith('/')) return src;   // workflow 已經補過 /repo/ 時
+  if (src.startsWith('/')) return src;   // 如果 workflow 已補過 /repo/
   return PAGE_BASE + src.replace(/^\.?\//,'');
+}
+
+// 取得目前曲目
+export function currentTrack() {
+  const gi = STATE.queue[STATE.qIndex];
+  return STATE.tracks[gi];
 }
 
 // 載入 tracks.json（必要）
@@ -39,6 +43,8 @@ export async function loadTracks() {
     const arr = await res.json();
     STATE.tracks = (arr || []).map(t => ({
       ...t,
+      title: t.title || t.name || (t.file || t.src || "").split("/").pop(),
+      artist: t.artist || "",
       file: resolveFile(t.file || t.src || t.url || "")
     }));
   } catch (e) {
@@ -61,11 +67,6 @@ export function rebuildQueue() {
   updateNowPlayingUI();
 }
 
-function currentTrack() {
-  const gi = STATE.queue[STATE.qIndex];
-  return STATE.tracks[gi];
-}
-
 // ---- 播放控制 ----
 export async function playCurrent() {
   const t = currentTrack();
@@ -74,6 +75,7 @@ export async function playCurrent() {
   try {
     await audio.play();
     updateNowPlayingUI(true);
+    if (STATE.bgEnabled) updateDanbooruBackground(t);
   } catch (e) {
     console.warn("audio play error:", e);
   }
@@ -106,8 +108,9 @@ audio.addEventListener("ended", next);
 
 // 音量 / 靜音
 export function setVolume(v) {
-  audio.volume = Math.max(0, Math.min(1, v));
-  if (audio.volume > 0) STATE.lastVolume = audio.volume;
+  const nv = Math.max(0, Math.min(1, v));
+  audio.volume = nv;
+  if (nv > 0) STATE.lastVolume = nv;
   updateMuteIcon();
 }
 export function toggleMute() {
@@ -119,22 +122,25 @@ export function toggleMute() {
   }
 }
 
-// UI 更新（播放鍵圖示 / 播放中高亮）
+// ---- UI 更新（播放鍵 / 播放中高亮 / 時間） ----
 export function updateNowPlayingUI(isPlaying = !audio.paused) {
   const playBtn = document.getElementById("play");
-  playBtn.textContent = isPlaying ? "⏸" : "▶";
+  if (playBtn) playBtn.textContent = isPlaying ? "⏸" : "▶";
 
   const list = document.getElementById("playlistItems");
-  if (!list) return;
-  const items = list.querySelectorAll("li");
-  items.forEach(el => el.classList.remove("active"));
   const gi = STATE.queue[STATE.qIndex];
-  const active = list.querySelector(`[data-gi="${gi}"]`);
-  if (active) active.classList.add("active");
+  if (list) {
+    const items = list.querySelectorAll("li");
+    items.forEach(el => el.classList.remove("active"));
+    const active = list.querySelector(`[data-gi="${gi}"]`);
+    if (active) active.classList.add("active");
+  }
+
+  // 時間 / 進度（由 ui.js 讀 audio 做顯示與拖曳，此處不處理）
 }
 export function updateMuteIcon() {
   const muteBtn = document.getElementById("muteBtn");
-  muteBtn.textContent = audio.volume > 0 ? "🔊" : "🔇";
+  if (muteBtn) muteBtn.textContent = (audio.volume > 0) ? "🔊" : "🔇";
 }
 
 // 初始呼叫：由 ui.js 觸發
@@ -142,4 +148,58 @@ export async function initPlayer() {
   await loadTracks();
   setVolume(1);
   updateNowPlayingUI(false);
+  if (STATE.bgEnabled) updateDanbooruBackground();
 }
+
+/* ---------------- Danbooru 背景 ---------------- */
+const bg = document.getElementById("bg");
+const bgNext = document.getElementById("bgNext");
+
+async function fetchDanbooruUrl(tags) {
+  const qs = `https://danbooru.donmai.us/posts.json?limit=1&random=true&tags=${encodeURIComponent(tags)}`;
+  const res = await fetch(qs, { cache: "no-store" });
+  if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
+  const arr = await res.json();
+  const p = arr && arr[0];
+  // 優先使用大圖，其次原圖，再次預覽
+  const src = p?.large_file_url || p?.file_url || p?.preview_file_url || p?.source;
+  return src ? (src.startsWith("http") ? src : `https://danbooru.donmai.us${src}`) : "";
+}
+
+let bgSwapping = false;
+export async function updateDanbooruBackground(track) {
+  if (!STATE.bgEnabled || bgSwapping) return;
+  bgSwapping = true;
+  try {
+    // 以 tag 為主；如果有曲名，嘗試加上關鍵字以提高關聯度
+    let tag = STATE.bgTag || "touhou rating:safe";
+    if (track?.title) tag = `${track.title.replace(/\s+/g,"_")} ${tag}`;
+    let src = await fetchDanbooruUrl(tag);
+    if (!src) src = await fetchDanbooruUrl(STATE.bgTag || "touhou rating:safe");
+
+    if (src) {
+      bgNext.style.backgroundImage = `url("${src}")`;
+      bgNext.style.opacity = "1";
+      bg.style.opacity = "0";
+      setTimeout(() => {
+        bg.style.backgroundImage = `url("${src}")`;
+        bg.style.opacity = "1";
+        bgNext.style.opacity = "0";
+        bgSwapping = false;
+      }, 850);
+    } else {
+      bgSwapping = false; // 沒有取到就略過
+    }
+  } catch (e) {
+    console.warn("Danbooru 取圖失敗：", e);
+    bgSwapping = false;
+  }
+}
+
+// 提供 UI 存取設定
+export function setBgEnabled(v){ STATE.bgEnabled = !!v; }
+export function setBgTag(tag){ STATE.bgTag = String(tag || "").trim() || "touhou rating:safe"; }
+export function getBgSettings(){ return { enabled: STATE.bgEnabled, tag: STATE.bgTag }; }
+
+// 匯出 audio 供 ui.js 使用
+export { audio, PAGE_BASE };

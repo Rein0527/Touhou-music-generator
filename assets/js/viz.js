@@ -1,4 +1,4 @@
-// 只負責視覺化
+// 只負責視覺化（等化器 + 進度環顯示）；進度拖曳改由下方水平進度條處理
 const audio = document.getElementById("audio");
 const canvas = document.getElementById("viz");
 const ctx = canvas.getContext("2d");
@@ -41,6 +41,7 @@ function draw() {
       ctx.beginPath(); ctx.moveTo(x1,y1); ctx.lineTo(x2,y2); ctx.stroke();
     }
 
+    // 僅顯示弧形進度（視覺），實際拖曳在下方水平條
     const d=audio.duration||0, ct=audio.currentTime||0, p=d>0?ct/d:0;
     const s=-Math.PI/2, e=s+p*Math.PI*2;
     ctx.strokeStyle="rgba(255,255,255,.18)"; ctx.lineWidth=10;

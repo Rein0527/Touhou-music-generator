@@ -1,15 +1,11 @@
 :root{
-  /* 主題色 */
+  /* 新增主題色，整站共用 */
   --accent: #bb71f3;
 
-  /* 背景/視覺化控制變數 */
+  /* 既有變數 */
   --bg-dim: 1;            /* 顯示圖片時 → 0；關閉圖片時 → 1 */
   --bg-fit: contain;      /* 預設改成 contain */
   --bg-blur: 0px;         /* 顯示圖片時關閉模糊；關閉背景時改為 8px */
-
-  /* Cross-fade 參數 */
-  --bg-xfade-ms: 600ms;                        /* ← 你要的 600ms */
-  --bg-xfade-ease: cubic-bezier(.22,.61,.36,1);
 }
 
 /* 背景與舞台 */
@@ -25,28 +21,17 @@ html, body {
   background-repeat: no-repeat;
   filter: blur(var(--bg-blur)) saturate(1.05) brightness(0.74);
   transform:scale(1.03);
-  /* 以變數控制淡入淡出時長與曲線 */
-  transition:
-    opacity var(--bg-xfade-ms) var(--bg-xfade-ease),
-    background-size .2s ease,
-    filter .2s ease;
-  will-change: opacity, filter, background-image;
+  /* ↓ 把 opacity 過場調成 600ms */
+  transition:opacity .6s ease, background-size .2s ease, filter .2s ease;
 }
 .bg{opacity:1}
 .bg-next{opacity:0}
-
-/* 可選：進場瞬間微調（想關就刪掉此段） */
-.bg-next.fade-entering {
-  filter: blur(0.2px) saturate(1.06) brightness(0.78);
-}
-
 .bg-dim{
   position:absolute; inset:0;
   background:radial-gradient(ellipse at center,rgba(0,0,0,.2),rgba(0,0,0,.62) 58%,rgba(0,0,0,.82));
   opacity: var(--bg-dim);
   transition: opacity .25s ease;
 }
-
 .stage{ position:relative; z-index:5; display:grid; place-items:center; min-height:72vh; padding-top:5vh; gap:16px; }
 canvas{ width:min(78vmin,1040px); height:min(78vmin,1040px); aspect-ratio:1/1; touch-action:none; }
 

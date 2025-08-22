@@ -2,9 +2,10 @@
 <html lang="zh-Hant">
 <head>
   <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Touhou music generator</title>
   <link rel="stylesheet" href="assets/css/style.css" />
+  <meta name="theme-color" content="#0b0d12" />
 </head>
 <body>
   <div class="app" id="app">
@@ -117,18 +118,14 @@
         <button class="btn icon" id="next" title="下一首">⏭</button>
       </div>
       <div class="bar-right">
-
-		<!-- 下載目前背景圖 -->
-		<button class="btn icon" id="dlBgBtn" title="下載背景圖片">
-		  <svg xmlns="http://www.w3.org/2000/svg" 
-			   viewBox="0 0 24 24" 
-			   class="icon-download" 
-			   fill="white">
-			<path d="M5 20h14v-2H5v2zM12 2v12l4-4h-3V2h-2v8H8l4 4z"/>
-		  </svg>
-		</button>
-		<!-- 設定按鈕 -->
-		<button class="btn icon" id="settingsBtn" title="設定">⚙</button>	  
+        <!-- 下載目前背景圖 -->
+        <button class="btn icon" id="dlBgBtn" title="下載背景圖片" aria-label="下載背景圖片">
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" class="icon-download" fill="white" aria-hidden="true">
+            <path d="M5 20h14v-2H5v2zM12 2v12l4-4h-3V2h-2v8H8l4 4z"/>
+          </svg>
+        </button>
+        <!-- 設定按鈕 -->
+        <button class="btn icon" id="settingsBtn" title="設定">⚙</button>
         <div class="vol">
           <button id="muteBtn" class="btn icon" title="靜音/恢復">🔊</button>
           <input id="volume" type="range" min="0" max="1" step="0.01" value="1" />

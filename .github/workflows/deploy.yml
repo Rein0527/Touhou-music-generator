@@ -6,7 +6,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: write   # ← 若想把 JSON 回寫到 repo，需要 write；只是部署也可保留
+  contents: read
   pages: write
   id-token: write
 
@@ -21,41 +21,17 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Env info (Node/Bash)
-        run: |
-          node -v
-          bash --version
-          echo "Workspace:"; ls -la
-
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
           node-version: 20
 
-      - name: Verify project layout
+      - name: Generate tracks.json & images.json
         run: |
-          echo "Root listing:"; ls -la
-          echo "music/ listing:"; ls -la music || echo "(no music dir)"
-          echo "data/ listing:"; ls -la data || echo "(no data dir yet)"
-
-      - name: Generate data/tracks.json & images.json
-        shell: bash
-        run: |
-          set -euo pipefail
-          mkdir -p data scripts
-          # 說明檔（自動建立/覆蓋）
-          cat > data/README.md << 'MD'
-          # Data 資料夾說明
-          此資料夾的檔案由 GitHub Actions 自動產生，請勿手動編輯。
-          - `tracks.json`：由 `/music/**` 自動掃描音檔生成。
-          - `images.json`：依 `tracks.json` 的 tags 從 Danbooru 擷取 rating:safe 圖片生成。
-          新增歌曲：把檔案放到 `/music/` 或子資料夾並 push，Actions 會自動重建這些檔案。
-          MD
-
-          # 生成腳本
-          cat > scripts/gen.mjs << 'EOF'
-          import fs from 'node:fs';
-          import path from 'node:path';
+          mkdir -p data
+          node --input-type=module - <<'NODE'
+          import fs from 'fs';
+          import path from 'path';
 
           const musicRoot = path.join(process.cwd(),'music');
           const dataDir   = path.join(process.cwd(),'data');
@@ -69,107 +45,75 @@ jobs:
               const p = path.join(dir, name);
               const st = fs.statSync(p);
               if (st.isDirectory()) out = out.concat(walk(p));
-              else if (exts.has(path.extname(name).toLowerCase())) out.push(p);
+              else {
+                const ext = path.extname(name).toLowerCase();
+                if (exts.has(ext)) out.push(p);
+              }
             }
             return out;
           }
 
-          // ---- tracks.json ----
+          // 產生 tracks.json
           let relFiles = [];
           if (fs.existsSync(musicRoot)) {
             relFiles = walk(musicRoot).map(abs =>
               path.posix.join('music', path.relative(musicRoot, abs).split(path.sep).join('/'))
             );
-          } else {
-            console.log('⚠️  沒有 /music 目錄，tracks.json 將為空陣列');
           }
-
-          function sanitizeTag(s){ return s.toLowerCase().replace(/[^a-z0-9_\-]/g,'').slice(0,40); }
-
           const tracks = relFiles.map(rel => {
             const base = path.basename(rel).replace(/\.[^.]+$/,'');
             let artist='Unknown', title=base;
             const m = base.split(' - ');
             if (m.length>=2){ artist=m[0]; title=m.slice(1).join(' - '); }
-            // 路徑 → tags（資料夾名 + 檔名關鍵詞）+ 預設 touhou
-            const segs = rel.split('/').slice(1,-1);
-            const dirTags = segs.map(sanitizeTag).filter(Boolean);
-            const nameTags = base.split(/[^a-zA-Z0-9]+/).map(sanitizeTag).filter(Boolean);
-            const set = new Set(['touhou', ...dirTags, ...nameTags]);
-            return { file: rel, title, artist, tags: [...set].slice(0,8) };
+            return { file: rel, title, artist };
           });
+          fs.writeFileSync(path.join(dataDir,'tracks.json'), JSON.stringify(tracks,null,2));
+          console.log('✅ tracks.json generated:', tracks.length, 'tracks');
 
-          fs.writeFileSync(path.join(dataDir,'tracks.json'), JSON.stringify(tracks, null, 2));
-          console.log('✅ tracks.json 產生完成，曲目數：', tracks.length);
-
-          // ---- images.json ----
-          const tagSet = new Set(['touhou']);
-          tracks.forEach(t => (t.tags||['touhou']).forEach(tag => tagSet.add(tag)));
-
+          // 產生 images.json（從 tags 抓 Danbooru）
+          const tags = new Set(['touhou']);
+          tracks.forEach(t=>tags.add('touhou'));
           const images = {};
-          for (const tag of tagSet) {
+          for (const tag of tags) {
             try {
-              const url = `https://danbooru.donmai.us/posts.json?limit=30&tags=${encodeURIComponent(tag + ' rating:safe order:rank')}`;
-              const res = await fetch(url, { headers: { 'User-Agent': 'GitHubActions/1.0 (+pages)' }});
-              if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
+              const url = `https://danbooru.donmai.us/posts.json?limit=30&tags=${encodeURIComponent(tag+' rating:safe order:rank')}`;
+              const res = await fetch(url, { headers: { 'User-Agent': 'GitHubActions' }});
+              if (!res.ok) throw new Error(res.statusText);
               const arr = await res.json();
-              const seen = new Set(); const list = [];
+              const seen = new Set(); const list=[];
               for (const p of arr) {
                 const u = p.large_file_url || p.file_url;
-                if (!u || p.rating !== 's') continue;
+                if (!u || p.rating!=='s') continue;
                 const abs = u.startsWith('http') ? u : `https://danbooru.donmai.us${u}`;
                 if (seen.has(abs)) continue;
                 seen.add(abs);
-                list.push({ url: abs, source: `post:${p.id}` });
+                list.push({url:abs, source:`post:${p.id}`});
               }
-              images[tag] = list;
-              console.log(`🖼️  ${tag}: ${list.length} 張`);
-              await new Promise(r => setTimeout(r, 250));
-            } catch (err) {
-              console.log('⚠️  產生圖片失敗：', tag, err.message);
-              images[tag] = images[tag] || [];
+              images[tag]=list;
+              console.log(`🖼️ ${tag}: ${list.length} images`);
+              await new Promise(r=>setTimeout(r,300));
+            } catch(e){
+              console.log('⚠️ image fetch failed for', tag, e.message);
+              images[tag]=[];
             }
           }
-          fs.writeFileSync(path.join(dataDir,'images.json'), JSON.stringify(images, null, 2));
-          console.log('✅ images.json 產生完成');
-          EOF
+          fs.writeFileSync(path.join(dataDir,'images.json'), JSON.stringify(images,null,2));
+          console.log('✅ images.json generated');
+          NODE
 
-          node scripts/gen.mjs
-
-      - name: Sanity check artifacts
+      - name: Sanity check
         run: |
-          echo "--- data dir (workspace) ---"; ls -la data || true
-          echo "--- tracks head ---"; (head -n 20 data/tracks.json || true)
-          echo "--- images head ---"; (head -n 20 data/images.json || true)
+          echo "--- data ---"
+          ls -l data
+          head -n 10 data/tracks.json || true
+          head -n 10 data/images.json || true
 
-      # （可選）把產生的 JSON 回寫到 repo，讓你在 GitHub 檔案樹也看得到
-      - name: Commit generated JSON back to repo (optional)
-        if: ${{ success() }}
+      - name: Prepare artifact
         run: |
-          set -e
-          if [ -n "$(git status --porcelain data)" ]; then
-            git config user.name  "github-actions[bot]"
-            git config user.email "github-actions[bot]@users.noreply.github.com"
-            git add data/*.json data/README.md
-            git commit -m "chore(data): auto-generate tracks/images"
-            git push || echo "(no changes pushed)"
-          else
-            echo "No changes in data/ to commit."
-          fi
-
-      - name: Prepare artifact (copy everything to dist via tar)
-        shell: bash
-        run: |
-          set -euo pipefail
-          rm -rf dist
           mkdir -p dist
-          tar -cf - \
-            --exclude='./.git' \
-            --exclude='./dist' \
-            . | (cd dist && tar -xf -)
-          echo "Dist listing:"; ls -la dist
-          echo "Dist/data:"; ls -la dist/data || true
-          echo "Dist/music:"; ls -la dist/music || true
+          shopt -s extglob
+          cp -r !(dist|.git|.github) dist/ || true
+          cp -r .github dist/.github || true
 
       - name: Configure Pages
         uses: actions/configure-pages@v5

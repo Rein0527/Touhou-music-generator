@@ -3,148 +3,54 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Touhou Player — Rev G</title>
-  <style>
-    :root {
-      --bg-fade-ms:850; --text:#edeef2; --muted:#9aa3b2;
-      --panel:rgba(16,18,24,.55); --border:rgba(148,163,184,.16);
-      --accent:#e8458b; --accent-2:#7aa8ff;
-    }
-    html,body{height:100%;margin:0;background:#0b0d12;color:var(--text);
-      font-family:ui-sans-serif,system-ui,-apple-system,Segoe UI,Roboto,"Noto Sans","PingFang TC","Microsoft JhengHei",Arial;}
-    .app{position:relative;min-height:100%;overflow:hidden;}
-    .bg,.bg-next{position:absolute;inset:0;background-position:center;background-size:cover;
-      filter:blur(8px) saturate(1.05) brightness(.74);transform:scale(1.03);
-      transition:opacity calc(var(--bg-fade-ms)*1ms) ease;}
-    .bg{opacity:1}.bg-next{opacity:0}
-    .bg-dim{position:absolute;inset:0;background:radial-gradient(ellipse at center,rgba(0,0,0,.2),rgba(0,0,0,.62) 58%,rgba(0,0,0,.82));pointer-events:none;}
-
-    .stage{position:relative;z-index:10;display:grid;place-items:center;min-height:72vh;padding-top:5vh;}
-    canvas{width:min(78vmin,1040px);height:min(78vmin,1040px);aspect-ratio:1/1;touch-action:none;}
-
-    /* 播放列 */
-    .bar{position:fixed;left:0;right:0;bottom:0;z-index:20;display:flex;
-      justify-content:space-between;align-items:center;
-      padding:12px clamp(14px,3vw,24px);backdrop-filter:blur(8px);
-      background:var(--panel);border-top:1px solid var(--border);}
-    .controls{display:flex;align-items:center;gap:14px;}
-    .btn{appearance:none;border:1px solid rgba(148,163,184,.22);color:var(--text);
-      background:linear-gradient(180deg,rgba(33,41,54,.65),rgba(18,23,33,.65));
-      padding:10px 12px;border-radius:12px;font-size:14px;cursor:pointer;user-select:none}
-    .btn.icon{width:48px;height:48px;display:grid;place-items:center;font-size:20px}
-    .btn:hover{border-color:rgba(255,255,255,.35)}
-
-    .bar-left,.bar-right{display:flex;align-items:center;gap:10px;}
-
-    /* 清單面板 */
-    .playlist{position:fixed;inset:0;background:rgba(18,23,33,0.85);backdrop-filter:blur(12px);
-      z-index:50;display:none;flex-direction:column;overflow-y:auto;}
-    .playlist.show{display:flex;}
-    .playlist h3{margin:12px;padding:8px 14px;font-size:16px;border-bottom:1px solid var(--border);}
-    .playlist ul{list-style:none;margin:0;padding:0;}
-    .playlist li{padding:10px 16px;cursor:pointer;border-bottom:1px solid rgba(255,255,255,0.1);}
-    .playlist li:hover{background:rgba(255,255,255,0.1);}
-    .playlist .close{align-self:flex-end;margin:8px;font-size:20px;cursor:pointer;}
-
-    /* 設定面板 */
-    .settings{position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);
-      background:rgba(30,30,40,0.9);backdrop-filter:blur(10px);
-      border:1px solid var(--border);padding:20px;z-index:60;display:none;flex-direction:column;gap:10px;}
-    .settings.show{display:flex;}
-    .settings label{font-size:14px;}
-  </style>
+  <title>Touhou Player</title>
+  <link rel="stylesheet" href="assets/css/style.css">
 </head>
 <body>
-<div class="app">
-  <div class="bg" id="bg"></div>
-  <div class="bg-next" id="bgNext"></div>
-  <div class="bg-dim"></div>
+  <div class="app">
+    <div class="bg" id="bg"></div>
+    <div class="bg-next" id="bgNext"></div>
+    <div class="bg-dim"></div>
 
-  <div class="stage"><canvas id="viz" width="1200" height="1200"></canvas></div>
+    <div class="stage"><canvas id="viz" width="1200" height="1200"></canvas></div>
 
-  <!-- 播放列 -->
-  <div class="bar">
-    <div class="bar-left">
-      <button class="btn icon" id="toggleList">☰</button>
+    <!-- 播放列 -->
+    <div class="bar">
+      <div class="bar-left">
+        <button class="btn icon" id="toggleList">☰</button>
+      </div>
+      <div class="controls">
+        <button class="btn icon" id="prev">⏮</button>
+        <button class="btn icon" id="play">▶</button>
+        <button class="btn icon" id="next">⏭</button>
+      </div>
+      <div class="bar-right">
+        <button class="btn icon" id="toggleShuffle">🔀</button>
+        <button class="btn icon" id="toggleRepeat">🔁</button>
+        <button class="btn icon" id="toggleSettings">⚙</button>
+        <input type="range" id="volume" min="0" max="1" step="0.01" value="1"/>
+      </div>
     </div>
-    <div class="controls">
-      <button class="btn icon" id="prev">⏮</button>
-      <button class="btn icon" id="play">▶</button>
-      <button class="btn icon" id="next">⏭</button>
+
+    <!-- 清單面板 -->
+    <div class="playlist" id="playlist">
+      <div class="close" id="closeList">✖</div>
+      <h3>播放清單</h3>
+      <ul id="trackList"></ul>
     </div>
-    <div class="bar-right">
-      <button class="btn icon" id="toggleShuffle" title="隨機播放">🔀</button>
-      <button class="btn icon" id="toggleRepeat" title="重複播放">🔁</button>
-      <button class="btn icon" id="toggleSettings">⚙</button>
-      <input type="range" id="volume" min="0" max="1" step="0.01" value="1"/>
+
+    <!-- 設定面板 -->
+    <div class="settings" id="settings">
+      <label>背景 Tag：<input type="text" id="bgTag" placeholder="例如：reimu"/></label>
+      <label>輪播秒數：<input type="number" id="bgInterval" value="15" min="5"/></label>
+      <button class="btn" id="closeSettings">關閉</button>
     </div>
   </div>
 
-  <!-- 清單面板 -->
-  <div class="playlist" id="playlist">
-    <div class="close" id="closeList">✖</div>
-    <h3>播放清單</h3>
-    <ul id="trackList"></ul>
-  </div>
+  <audio id="audio"></audio>
 
-  <!-- 設定面板 -->
-  <div class="settings" id="settings">
-    <label>背景 Tag：<input type="text" id="bgTag" placeholder="例如：reimu"/></label>
-    <label>輪播秒數：<input type="number" id="bgInterval" value="15" min="5"/></label>
-    <button class="btn" id="closeSettings">關閉</button>
-  </div>
-</div>
-
-<audio id="audio"></audio>
-
-<script>
-const elAudio = document.getElementById("audio");
-const elPlay = document.getElementById("play");
-const elPrev = document.getElementById("prev");
-const elNext = document.getElementById("next");
-const elVol = document.getElementById("volume");
-const elPlaylist = document.getElementById("playlist");
-const elTrackList = document.getElementById("trackList");
-const elSettings = document.getElementById("settings");
-
-let shuffle = false, repeat = false;
-let tracks = [
-  {file:"music/test1.mp3",title:"曲目一"},
-  {file:"music/test2.mp3",title:"曲目二"},
-];
-let qIndex=0;
-
-function loadTrack(i){
-  qIndex=i; elAudio.src=tracks[i].file; elAudio.play();
-  renderList();
-}
-function renderList(){
-  elTrackList.innerHTML="";
-  tracks.forEach((t,i)=>{
-    const li=document.createElement("li");
-    li.textContent=t.title;
-    if(i===qIndex) li.style.color="var(--accent)";
-    li.onclick=()=>loadTrack(i);
-    elTrackList.appendChild(li);
-  });
-}
-function togglePlay(){ if(elAudio.paused) elAudio.play(); else elAudio.pause(); }
-elPlay.onclick=togglePlay;
-elPrev.onclick=()=>loadTrack((qIndex-1+tracks.length)%tracks.length);
-elNext.onclick=()=>loadTrack((qIndex+1)%tracks.length);
-elAudio.onplay=()=>elPlay.textContent="⏸";
-elAudio.onpause=()=>elPlay.textContent="▶";
-elVol.oninput=()=>elAudio.volume=parseFloat(elVol.value);
-
-// 切換面板
-document.getElementById("toggleList").onclick=()=>{elPlaylist.classList.add("show"); renderList();}
-document.getElementById("closeList").onclick=()=>elPlaylist.classList.remove("show");
-document.getElementById("toggleSettings").onclick=()=>elSettings.classList.add("show");
-document.getElementById("closeSettings").onclick=()=>elSettings.classList.remove("show");
-
-// 隨機/重複
-document.getElementById("toggleShuffle").onclick=()=>{shuffle=!shuffle; alert("隨機:"+shuffle);}
-document.getElementById("toggleRepeat").onclick=()=>{repeat=!repeat; alert("重複:"+repeat);}
-</script>
+  <script src="assets/js/viz.js"></script>
+  <script src="assets/js/ui.js"></script>
+  <script src="assets/js/player.js"></script>
 </body>
 </html>

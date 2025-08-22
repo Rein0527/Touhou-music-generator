@@ -6,7 +6,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write   # ← 若想把 JSON 回寫到 repo，需要 write；只是部署也可保留
   pages: write
   id-token: write
 
@@ -24,7 +24,6 @@ jobs:
       - name: Env info (Node/Bash)
         run: |
           node -v
-          npm -v || true
           bash --version
           echo "Workspace:"; ls -la
 
@@ -44,6 +43,16 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p data scripts
+          # 說明檔（自動建立/覆蓋）
+          cat > data/README.md << 'MD'
+          # Data 資料夾說明
+          此資料夾的檔案由 GitHub Actions 自動產生，請勿手動編輯。
+          - `tracks.json`：由 `/music/**` 自動掃描音檔生成。
+          - `images.json`：依 `tracks.json` 的 tags 從 Danbooru 擷取 rating:safe 圖片生成。
+          新增歌曲：把檔案放到 `/music/` 或子資料夾並 push，Actions 會自動重建這些檔案。
+          MD
+
+          # 生成腳本
           cat > scripts/gen.mjs << 'EOF'
           import fs from 'node:fs';
           import path from 'node:path';
@@ -82,7 +91,8 @@ jobs:
             let artist='Unknown', title=base;
             const m = base.split(' - ');
             if (m.length>=2){ artist=m[0]; title=m.slice(1).join(' - '); }
-            const segs = rel.split('/').slice(1,-1); // e.g. [ 'th10' ]
+            // 路徑 → tags（資料夾名 + 檔名關鍵詞）+ 預設 touhou
+            const segs = rel.split('/').slice(1,-1);
             const dirTags = segs.map(sanitizeTag).filter(Boolean);
             const nameTags = base.split(/[^a-zA-Z0-9]+/).map(sanitizeTag).filter(Boolean);
             const set = new Set(['touhou', ...dirTags, ...nameTags]);
@@ -114,7 +124,7 @@ jobs:
               }
               images[tag] = list;
               console.log(`🖼️  ${tag}: ${list.length} 張`);
-              await new Promise(r => setTimeout(r, 250)); // 輕微節流
+              await new Promise(r => setTimeout(r, 250));
             } catch (err) {
               console.log('⚠️  產生圖片失敗：', tag, err.message);
               images[tag] = images[tag] || [];
@@ -128,17 +138,31 @@ jobs:
 
       - name: Sanity check artifacts
         run: |
-          echo "--- data dir ---"; ls -la data || true
+          echo "--- data dir (workspace) ---"; ls -la data || true
           echo "--- tracks head ---"; (head -n 20 data/tracks.json || true)
           echo "--- images head ---"; (head -n 20 data/images.json || true)
 
-      - name: Prepare artifact
+      # （可選）把產生的 JSON 回寫到 repo，讓你在 GitHub 檔案樹也看得到
+      - name: Commit generated JSON back to repo (optional)
+        if: ${{ success() }}
+        run: |
+          set -e
+          if [ -n "$(git status --porcelain data)" ]; then
+            git config user.name  "github-actions[bot]"
+            git config user.email "github-actions[bot]@users.noreply.github.com"
+            git add data/*.json data/README.md
+            git commit -m "chore(data): auto-generate tracks/images"
+            git push || echo "(no changes pushed)"
+          else
+            echo "No changes in data/ to commit."
+          fi
+
+      - name: Prepare artifact (copy everything to dist via tar)
         shell: bash
         run: |
           set -euo pipefail
           rm -rf dist
           mkdir -p dist
-          # 用 tar 方式把所有檔案複製到 dist，排除 .git 和 dist 自己
           tar -cf - \
             --exclude='./.git' \
             --exclude='./dist' \

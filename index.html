@@ -3,32 +3,25 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Touhou Player — M1+M2 MVP (Rev D)</title>
+  <title>Touhou Player — M1+M2 MVP (Rev E)</title>
   <style>
-    :root {
-      --bg-fade-ms: 850;
-      --text: #edeef2; --muted: #9aa3b2;
-      --panel: rgba(16,18,24,0.55); --border: rgba(148,163,184,0.16);
-    }
-    html, body { height: 100%; margin: 0; background:#0b0d12; color:var(--text); font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, "Noto Sans", "PingFang TC", "Microsoft JhengHei", Arial; }
-    .app { position: relative; min-height: 100%; overflow: hidden; }
-    .bg, .bg-next { position:absolute; inset:0; background-position:center; background-size:cover; filter: blur(8px) saturate(1.05) brightness(0.74); transform: scale(1.03); transition: opacity calc(var(--bg-fade-ms) * 1ms) ease; }
-    .bg { opacity:1; } .bg-next { opacity:0; }
-    .bg-dim { position:absolute; inset:0; background: radial-gradient(ellipse at center, rgba(0,0,0,0.2), rgba(0,0,0,0.62) 58%, rgba(0,0,0,0.82)); pointer-events:none; }
-    .stage { position:relative; z-index:10; display:grid; place-items:center; min-height:72vh; padding-top:5vh; }
-    canvas { width:min(78vmin,1040px); height:min(78vmin,1040px); aspect-ratio:1/1; touch-action:none; }
-    .bar { position:fixed; left:0; right:0; bottom:0; z-index:20; display:grid; grid-template-columns:auto 1fr auto auto; gap:14px; align-items:center; padding:12px clamp(14px,3vw,24px); backdrop-filter: blur(8px); background:var(--panel); border-top:1px solid var(--border); }
-    .meta { min-width:200px; overflow:hidden; }
-    .title { font-weight:700; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
-    .artist { color:var(--muted); font-size:12px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
-    .controls { display:inline-flex; gap:10px; }
-    .btn { appearance:none; border:1px solid rgba(148,163,184,0.22); color:var(--text); background:linear-gradient(180deg, rgba(33,41,54,.65), rgba(18,23,33,.65)); padding:10px 12px; border-radius:12px; font-size:14px; cursor:pointer; user-select:none; }
-    .btn.icon{ width:44px; height:44px; display:grid; place-items:center; font-size:18px;}
-    .vol{ display:inline-flex; align-items:center; gap:8px; font-size:12px; color:var(--muted);} .vol input{ width:140px;}
-    .filepick{ font-size:12px; opacity:.85;}
-    .dropmask{ position:fixed; inset:0; background:rgba(18,23,33,0.75); color:var(--text); display:none; place-items:center; z-index:40; border:2px dashed rgba(255,255,255,0.35); font-size:clamp(16px,3vw,24px); letter-spacing:1px;}
-    .dropmask.on{ display:grid;}
-    .hint{ position:fixed; top:16px; left:50%; transform:translateX(-50%); font-size:12px; color:var(--muted); opacity:.88; z-index:20; background:var(--panel); border:1px solid var(--border); padding:6px 10px; border-radius:999px;}
+    :root { --bg-fade-ms:850; --text:#edeef2; --muted:#9aa3b2; --panel:rgba(16,18,24,.55); --border:rgba(148,163,184,.16); }
+    html,body{height:100%;margin:0;background:#0b0d12;color:var(--text);font-family:ui-sans-serif,system-ui,-apple-system,Segoe UI,Roboto,"Noto Sans","PingFang TC","Microsoft JhengHei",Arial;}
+    .app{position:relative;min-height:100%;overflow:hidden;}
+    .bg,.bg-next{position:absolute;inset:0;background-position:center;background-size:cover;filter:blur(8px) saturate(1.05) brightness(.74);transform:scale(1.03);transition:opacity calc(var(--bg-fade-ms)*1ms) ease;}
+    .bg{opacity:1}.bg-next{opacity:0}
+    .bg-dim{position:absolute;inset:0;background:radial-gradient(ellipse at center,rgba(0,0,0,.2),rgba(0,0,0,.62) 58%,rgba(0,0,0,.82));pointer-events:none;}
+    .stage{position:relative;z-index:10;display:grid;place-items:center;min-height:72vh;padding-top:5vh;}
+    canvas{width:min(78vmin,1040px);height:min(78vmin,1040px);aspect-ratio:1/1;touch-action:none;}
+    .bar{position:fixed;left:0;right:0;bottom:0;z-index:20;display:grid;grid-template-columns:auto 1fr auto auto;gap:14px;align-items:center;padding:12px clamp(14px,3vw,24px);backdrop-filter:blur(8px);background:var(--panel);border-top:1px solid var(--border);}
+    .meta{min-width:200px;overflow:hidden}.title{font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.artist{color:var(--muted);font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+    .controls{display:inline-flex;gap:10px}.btn{appearance:none;border:1px solid rgba(148,163,184,.22);color:var(--text);background:linear-gradient(180deg,rgba(33,41,54,.65),rgba(18,23,33,.65));padding:10px 12px;border-radius:12px;font-size:14px;cursor:pointer;user-select:none}
+    .btn.icon{width:44px;height:44px;display:grid;place-items:center;font-size:18px}
+    .vol{display:inline-flex;align-items:center;gap:8px;font-size:12px;color:var(--muted)}.vol input{width:140px}
+    .filepick{font-size:12px;opacity:.85}
+    .dropmask{position:fixed;inset:0;background:rgba(18,23,33,.75);color:var(--text);display:none;place-items:center;z-index:40;border:2px dashed rgba(255,255,255,.35);font-size:clamp(16px,3vw,24px);letter-spacing:1px}
+    .dropmask.on{display:grid}
+    .hint{position:fixed;top:16px;left:50%;transform:translateX(-50%);font-size:12px;color:var(--muted);opacity:.88;z-index:20;background:var(--panel);border:1px solid var(--border);padding:6px 10px;border-radius:999px}
   </style>
 </head>
 <body>
@@ -58,4 +51,181 @@
       <div class="vol">音量 <input id="volume" type="range" min="0" max="1" step="0.01" value="1" /></div>
     </div>
 
-    <div class="dropmas
+    <div class="dropmask" id="dropmask">拖放音檔到這裡以加入播放</div>
+  </div>
+
+  <!-- audio（同源） -->
+  <audio id="audio"></audio>
+
+  <script>
+  // ===== 狀態 =====
+  const STATE = {
+    tracks: [], localTracks: [],
+    queue: [], qIndex: 0,
+    playing: false,
+    imagesByTag: {}, currentImages: [], bgIdx: 0, bgTimer: null, bgIntervalMs: 15000,
+    pendingSeekPct: null,             // 等 metadata 後套用
+    loadedQi: null                    // 目前已載入到 <audio> 的 queue index
+  };
+
+  // ===== DOM =====
+  const $ = id => document.getElementById(id);
+  const elAudio = $("audio"); try { elAudio.preload = 'auto'; } catch {}
+  const elCanvas = $("viz"), ctx = elCanvas.getContext("2d");
+  const elPrev=$("prev"), elPlay=$("play"), elNext=$("next");
+  const elTitle=$("metaTitle"), elArtist=$("metaArtist");
+  const elFile=$("fileInput"), elVol=$("volume");
+  const dropmask=$("dropmask"); const bg=$("bg"), bgNext=$("bgNext");
+
+  // ===== 首次互動：保證 AudioContext 啟動 =====
+  let audioCtx, analyser, sourceNode, rafId=0, firstInteraction=false;
+  function ensureAudioGraph(){ if(!audioCtx){ audioCtx=new (window.AudioContext||window.webkitAudioContext)(); analyser=audioCtx.createAnalyser(); analyser.fftSize=2048; analyser.smoothingTimeConstant=0.8; sourceNode=audioCtx.createMediaElementSource(elAudio); sourceNode.connect(analyser); analyser.connect(audioCtx.destination);} }
+  function ensureInteract(){ if(firstInteraction) return; try{ ensureAudioGraph(); if(audioCtx.state==='suspended') audioCtx.resume(); }catch{} firstInteraction=true; }
+  ['click','keydown','pointerdown','touchstart'].forEach(ev => window.addEventListener(ev, ensureInteract, {passive:true}));
+
+  // ===== 載入資料 =====
+  async function loadJSON(path){ try{ const res=await fetch(path,{cache:'no-store'}); if(!res.ok) throw 0; return await res.json(); } catch { return null; } }
+  async function initData(){
+    const [tracks,images]=await Promise.all([loadJSON('data/tracks.json'),loadJSON('data/images.json')]);
+    STATE.tracks=Array.isArray(tracks)?tracks:[]; STATE.imagesByTag=(images&&typeof images==='object')?images:{};
+    rebuildQueue(); updateMeta(); refreshBackgroundPool();
+  }
+  function rebuildQueue(){ const count=STATE.tracks.length+STATE.localTracks.length; STATE.queue=[...Array(Math.max(count,1)).keys()]; for(let i=STATE.queue.length-1;i>0;i--){const j=Math.floor(Math.random()*(i+1)); [STATE.queue[i],STATE.queue[j]]=[STATE.queue[j],STATE.queue[i]];} STATE.qIndex=0; }
+  function resolveByQi(qi){ const gi=STATE.queue[qi], base=STATE.tracks.length; return gi<base?{...STATE.tracks[gi],isLocal:false}:{...STATE.localTracks[gi-base],isLocal:true}; }
+  function currentTrack(){ return resolveByQi(STATE.qIndex); }
+
+  // ===== 載入音源（僅換歌時） =====
+  function ensureTrackLoaded(qi){
+    if (STATE.loadedQi === qi) return true;       // 同一首，不重載
+    const t = resolveByQi(qi);
+    if (!t || !t.file) return false;
+    const src = encodeURI(t.file);                // 重要：避免空白/特殊字元
+    elAudio.src = src;
+    try { elAudio.load(); } catch {}
+    STATE.loadedQi = qi;
+    return true;
+  }
+
+  // ===== 播放控制 =====
+  function playCurrent(){
+    // 若是暫停後繼續：不要重新載入，直接 play
+    if (STATE.loadedQi === STATE.qIndex && !elAudio.ended && elAudio.currentTime > 0) {
+      return elAudio.play().then(()=>{ STATE.playing=true; elPlay.textContent='⏸'; startAfterPlay(); }).catch(fallbackNext);
+    }
+
+    // 換歌或尚未載入：載入並等待可播放
+    if (!ensureTrackLoaded(STATE.qIndex)) return;
+    const onLoadedMeta = () => {
+      if (Number.isFinite(elAudio.duration) && elAudio.duration>0 && STATE.pendingSeekPct!=null) {
+        elAudio.currentTime = Math.max(0, Math.min(elAudio.duration*STATE.pendingSeekPct, elAudio.duration-0.01));
+        STATE.pendingSeekPct = null;
+      }
+    };
+    const waitReady = new Promise((resolve,reject)=>{
+      const ok=()=>{clean();resolve();}, ng=()=>{clean();reject(new Error('media error'));};
+      const clean=()=>{ elAudio.removeEventListener('loadedmetadata',onLoadedMeta); elAudio.removeEventListener('canplay',ok); elAudio.removeEventListener('canplaythrough',ok); elAudio.removeEventListener('error',ng); elAudio.removeEventListener('stalled',ng); elAudio.removeEventListener('abort',ng); };
+      elAudio.addEventListener('loadedmetadata', onLoadedMeta);
+      elAudio.addEventListener('canplay', ok, {once:true});
+      elAudio.addEventListener('canplaythrough', ok, {once:true});
+      elAudio.addEventListener('error', ng, {once:true});
+      elAudio.addEventListener('stalled', ng, {once:true});
+      elAudio.addEventListener('abort', ng, {once:true});
+      setTimeout(()=>resolve(), 3500); // 雙保險
+    });
+    waitReady.then(async()=>{ try{ if(audioCtx && audioCtx.state==='suspended') await audioCtx.resume(); }catch{} return elAudio.play(); })
+             .then(()=>{ STATE.playing=true; elPlay.textContent='⏸'; startAfterPlay(); })
+             .catch(fallbackNext);
+  }
+  function startAfterPlay(){ updateMeta(); refreshBackgroundPool(); startViz(); }
+  function fallbackNext(err){ console.warn('play error',err); next(); }
+  function pause(){ elAudio.pause(); STATE.playing=false; elPlay.textContent='▶'; }
+  function togglePlay(){ (STATE.playing? pause: playCurrent)(); }
+  function prev(){ STATE.qIndex=(STATE.qIndex-1+STATE.queue.length)%STATE.queue.length; playCurrent(); }
+  function next(){ STATE.qIndex=(STATE.qIndex+1)%STATE.queue.length; playCurrent(); }
+
+  // ===== 視覺化 =====
+  function startViz(){
+    cancelAnimationFrame(rafId);
+    const W=elCanvas.width,H=elCanvas.height,cx=W/2,cy=H/2;
+    const radius=Math.min(W,H)*0.34, progressOuter=radius+52, progressThick=10, freqBins=64;
+    const data=new Uint8Array(analyser.frequencyBinCount);
+    (function loop(){
+      rafId=requestAnimationFrame(loop); if(!analyser) return;
+      analyser.getByteFrequencyData(data); ctx.clearRect(0,0,W,H);
+      const step=Math.floor(data.length/freqBins);
+      for(let i=0;i<freqBins;i++){ const v=data[i*step]/255, bar=24+v*160, a=(i/freqBins)*Math.PI*2;
+        const x1=cx+Math.cos(a)*radius, y1=cy+Math.sin(a)*radius, x2=cx+Math.cos(a)*(radius+bar), y2=cy+Math.sin(a)*(radius+bar);
+        ctx.strokeStyle=`rgba(255,255,255,${.3+v*.55})`; ctx.lineWidth=3.5; ctx.beginPath(); ctx.moveTo(x1,y1); ctx.lineTo(x2,y2); ctx.stroke(); }
+      const d=elAudio.duration||0, ct=elAudio.currentTime||0, p=d>0?ct/d:0;
+      const startA=-Math.PI/2, endA=startA+p*Math.PI*2;
+      ctx.strokeStyle="rgba(255,255,255,.18)"; ctx.lineWidth=progressThick; ctx.beginPath(); ctx.arc(cx,cy,progressOuter,0,Math.PI*2); ctx.stroke();
+      const g=ctx.createLinearGradient(cx-progressOuter,cy-progressOuter,cx+progressOuter,cy+progressOuter); g.addColorStop(0,"#ff8bd1"); g.addColorStop(1,"#6da8ff");
+      ctx.strokeStyle=g; ctx.lineCap="round"; ctx.beginPath(); ctx.arc(cx,cy,progressOuter,startA,endA,false); ctx.stroke();
+      const hx=cx+Math.cos(endA)*progressOuter, hy=cy+Math.sin(endA)*progressOuter; ctx.fillStyle="#fff"; ctx.beginPath(); ctx.arc(hx,hy,5.5,0,Math.PI*2); ctx.fill();
+    })();
+  }
+
+  // ===== 舞台點擊/拖曳快轉（含待處理快轉） =====
+  let dragging=false, startX=0, startTime=0, pendingSeek=null, scrubRaf=0, lowFps=false;
+  function canvasX(e){ const r=elCanvas.getBoundingClientRect(); return (e.clientX-r.left)*(elCanvas.width/r.width); }
+  function width(){ return elCanvas.width; }
+  function seekAbsoluteByX(x){ const w=width(), pct=Math.min(1,Math.max(0,x/w));
+    if(Number.isFinite(elAudio.duration)&&elAudio.duration>0){ scheduleSeek(elAudio.duration*pct); }
+    else { STATE.pendingSeekPct=pct; } }
+  function seekRelativeByDX(dx){ const w=width(); if(!Number.isFinite(elAudio.duration)||elAudio.duration<=0) return;
+    const delta=dx/w; const t=Math.min(elAudio.duration, Math.max(0, startTime + delta*elAudio.duration)); scheduleSeek(t); }
+  function scheduleSeek(t){ pendingSeek=t; if(!scrubRaf) scrubRaf=requestAnimationFrame(applySeek); }
+  function applySeek(){ scrubRaf=0; if(pendingSeek==null) return;
+    if(typeof elAudio.fastSeek==='function'){ try{ elAudio.fastSeek(pendingSeek);}catch{ elAudio.currentTime=pendingSeek; } }
+    else elAudio.currentTime=pendingSeek; pendingSeek=null; }
+
+  elCanvas.addEventListener('pointerdown', e=>{ ensureInteract(); elCanvas.setPointerCapture(e.pointerId); dragging=true; startX=canvasX(e); startTime=elAudio.currentTime||0; seekAbsoluteByX(startX); if(!lowFps&&analyser){ analyser.smoothingTimeConstant=0.9; lowFps=true; } });
+  elCanvas.addEventListener('pointermove', e=>{ if(!dragging) return; const x=canvasX(e); seekRelativeByDX(x-startX); });
+  function endDrag(e){ if(!dragging) return; dragging=false; try{ elCanvas.releasePointerCapture(e.pointerId);}catch{} if(lowFps&&analyser){analyser.smoothingTimeConstant=0.8; lowFps=false;} }
+  elCanvas.addEventListener('pointerup', endDrag); elCanvas.addEventListener('pointercancel', endDrag);
+
+  // ===== 背景輪播 =====
+  function refreshBackgroundPool(){ const t=currentTrack(); const tags=(t&&Array.isArray(t.tags)&&t.tags.length)?t.tags:['touhou']; const pool=[], seen=new Set();
+    for(const tag of tags){ const imgs=STATE.imagesByTag[tag]||[]; for(const it of imgs){ if(!it||!it.url||seen.has(it.url)) continue; seen.add(it.url); pool.push(it.url);} }
+    STATE.currentImages=pool; STATE.bgIdx=0; rotateBg(true); if(STATE.bgTimer) clearInterval(STATE.bgTimer); STATE.bgTimer=setInterval(()=>rotateBg(false),STATE.bgIntervalMs); }
+  function rotateBg(initial=false){ if(!STATE.currentImages.length) return; STATE.bgIdx=(STATE.bgIdx+(initial?0:1))%STATE.currentImages.length; const url=STATE.currentImages[STATE.bgIdx]; const img=new Image(); img.onload=()=>swapBg(url); img.src=url; }
+  function swapBg(url){ bgNext.style.backgroundImage=`url("${url}")`; bgNext.style.opacity=1; setTimeout(()=>{ bg.style.backgroundImage=`url("${url}")`; bgNext.style.opacity=0; }, parseInt(getComputedStyle(document.documentElement).getPropertyValue('--bg-fade-ms')) ); }
+
+  // ===== UI =====
+  function updateMeta(){ const t=currentTrack(); elTitle.textContent=t?(t.title||t.file.split('/').pop()):'—'; elArtist.textContent=t?(t.artist||(t.isLocal?'(Local)':'Unknown')):'—'; }
+  function toast(m){ console.log(m); }
+
+  elPrev.addEventListener('click', ()=>{ ensureInteract(); prev(); });
+  elNext.addEventListener('click', ()=>{ ensureInteract(); next(); });
+  elPlay.addEventListener('click', async ()=>{ ensureInteract(); try{ if(audioCtx&&audioCtx.state==='suspended') await audioCtx.resume(); }catch{} togglePlay(); });
+  elVol.addEventListener('input', ()=>{ elAudio.volume=parseFloat(elVol.value); });
+
+  elAudio.addEventListener('ended', next);
+  elAudio.addEventListener('error', ()=> next());
+  elAudio.addEventListener('stalled', ()=> next());
+  elAudio.addEventListener('abort', ()=> next());
+
+  // 鍵盤
+  window.addEventListener('keydown', e=>{
+    if(e.code==='Space'){ e.preventDefault(); ensureInteract(); togglePlay(); }
+    else if(e.key==='a'||e.key==='A'){ ensureInteract(); prev(); }
+    else if(e.key==='d'||e.key==='D'){ ensureInteract(); next(); }
+    else if(e.key==='ArrowLeft'){ elAudio.currentTime=Math.max(0,elAudio.currentTime-(e.ctrlKey?15:5)); }
+    else if(e.key==='ArrowRight'){ elAudio.currentTime=Math.min(elAudio.duration||1e9,elAudio.currentTime+(e.ctrlKey?15:5)); }
+  });
+
+  // 匯入本地檔
+  elFile.addEventListener('change', ()=> handleFiles(elFile.files));
+  function handleFiles(list){ const arr=Array.from(list||[]).filter(f=>f.type.startsWith('audio/'));
+    const news=arr.map(f=>({file:URL.createObjectURL(f),title:f.name.replace(/\.[^/.]+$/,''),artist:'(Local)',tags:['touhou']}));
+    if(news.length){ STATE.localTracks.push(...news); rebuildQueue(); updateMeta(); } }
+
+  // 拖放加入
+  ;['dragenter','dragover'].forEach(ev=>document.addEventListener(ev,e=>{ e.preventDefault(); dropmask.classList.add('on'); }));
+  ;['dragleave','drop'].forEach(ev=>document.addEventListener(ev,e=>{ e.preventDefault(); if(ev==='drop') handleFiles(e.dataTransfer.files); dropmask.classList.remove('on'); }));
+
+  // 啟動
+  initData();
+  </script>
+</body>
+</html>

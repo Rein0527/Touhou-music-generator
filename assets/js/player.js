@@ -1,4 +1,4 @@
-// 播放核心 + 資料載入 + queue 管理 + repeat/shuffle + Danbooru 背景 + 自動換圖 + 清晰背景
+// 播放核心 + 資料載入 + queue 管理 + repeat/shuffle + Danbooru 背景 + 自動換圖 + 清晰背景 + Media Session
 export const STATE = {
   tracks: [],
   queue: [],
@@ -14,7 +14,7 @@ export const STATE = {
   bgFit: "contain",     // 預設 contain
   bgIntervalSec: 10,    // 預設 10 秒自動換圖（0=停用）
 
-  // 目前已載入的背景圖（供下載）
+  // 目前已載入的背景圖（供下載 / Media Session 封面）
   bgSrc: "",
 };
 
@@ -82,6 +82,10 @@ export async function playCurrent() {
     await audio.play();
     updateNowPlayingUI(true);
     if (STATE.bgEnabled) updateDanbooruBackground(t, /*force*/ false);
+
+    // Media Session：更新系統卡片
+    updateMediaMetadata();
+    updatePlaybackState();
   } catch (e) {
     console.warn("audio play error:", e);
   }
@@ -158,6 +162,9 @@ export async function initPlayer() {
   applyBgGlass();  // 顯示圖片時關閉模糊
   setupBgAutoRotate();
   if (STATE.bgEnabled) updateDanbooruBackground();
+
+  // Media Session：註冊一次 action handlers
+  registerMediaActionsOnce();
 }
 
 /* ===================== 背景（Danbooru） ===================== */
@@ -171,7 +178,7 @@ function ratingToken(v){
   return map[v] || "general";
 }
 
-// 只產生「<單一主 tag> + rating」，主 tag 由使用者輸入，預設 touhou
+// ✅ 只產生「<單一主 tag> + rating」，主 tag 由使用者輸入，預設 touhou
 function buildTags() {
   const baseRaw = (STATE.bgTag || "touhou").trim();
   // 把空白轉底線，確保只是一個 Danbooru tag（避免多個 tag 觸發 422）
@@ -181,7 +188,7 @@ function buildTags() {
   return `${base} ${rating}`.replace(/\brandom:\S+\b/gi, "").trim();
 }
 
-// 使用 random=true 當查詢參數（不要用 random:1 當成 tag）
+// ✅ 使用 random=true 當查詢參數（不要用 random:1 當成 tag）
 async function fetchDanbooruUrl(tags) {
   const qs = `https://danbooru.donmai.us/posts.json?limit=1&random=true&tags=${encodeURIComponent(tags)}`;
   const res = await fetch(qs, { cache: "no-store" });
@@ -208,7 +215,7 @@ export async function updateDanbooruBackground(track, force = false) {
     if (!src) src = await fetchDanbooruUrl(buildTags());
 
     if (src) {
-      STATE.bgSrc = src; // 記住目前背景圖（供下載）
+      STATE.bgSrc = src; // ✅ 記住目前背景圖（供下載 / Media Session 封面）
       bgNext.style.backgroundImage = `url("${src}")`;
       bgNext.style.opacity = "1";
       bg.style.opacity = "0";
@@ -217,6 +224,9 @@ export async function updateDanbooruBackground(track, force = false) {
         bg.style.opacity = "1";
         bgNext.style.opacity = "0";
         bgSwapping = false;
+
+        // Media Session：封面同步
+        updateMediaMetadata();
       }, 850);
     } else {
       bgSwapping = false;
@@ -241,7 +251,7 @@ function applyBgGlass() {
 let bgTimer = null;
 function clearBgTimer(){ if(bgTimer){ clearInterval(bgTimer); bgTimer = null; } }
 
-// 只有在播放中才會跑自動換圖
+// ✅ 只有在播放中才會跑自動換圖
 function isPlaying() { return !audio.paused && !audio.ended; }
 
 function maybeKickRotate() {
@@ -285,7 +295,7 @@ export function getBgSettings(){
   };
 }
 
-// 下載目前背景圖
+// ✅ 下載目前背景圖
 export async function downloadCurrentBg() {
   try {
     const src = STATE.bgSrc;
@@ -315,5 +325,70 @@ export async function downloadCurrentBg() {
     if (STATE.bgSrc) window.open(STATE.bgSrc, "_blank");
   }
 }
+
+/* ===================== Media Session（系統層控制） ===================== */
+
+function mediaSessionSupported(){
+  return 'mediaSession' in navigator;
+}
+
+function updateMediaMetadata(){
+  if (!mediaSessionSupported()) return;
+  try{
+    const t = currentTrack() || {};
+    const title  = t.title || (t.file ? t.file.split('/').pop() : '—');
+    const artist = t.artist || 'Touhou Player';
+    const artSrc = STATE.bgSrc || '';
+    const artwork = artSrc ? [
+      { src: artSrc, sizes: '256x256', type: 'image/jpeg' },
+      { src: artSrc, sizes: '512x512', type: 'image/jpeg' },
+    ] : [];
+    navigator.mediaSession.metadata = new MediaMetadata({ title, artist, album: '', artwork });
+  }catch{}
+}
+
+function updatePlaybackState(){
+  if (!mediaSessionSupported()) return;
+  try{
+    navigator.mediaSession.playbackState = audio.paused ? 'paused' : 'playing';
+    const duration = isFinite(audio.duration) ? audio.duration : 0;
+    const position = isFinite(audio.currentTime) ? audio.currentTime : 0;
+    const rate = audio.playbackRate || 1;
+    if (navigator.mediaSession.setPositionState) {
+      navigator.mediaSession.setPositionState({ duration, position, playbackRate: rate });
+    }
+  }catch{}
+}
+
+function registerMediaActionsOnce(){
+  if (!mediaSessionSupported() || registerMediaActionsOnce._done) return;
+  registerMediaActionsOnce._done = true;
+
+  try{
+    navigator.mediaSession.setActionHandler('play',  async ()=>{ try{ await audio.play(); }catch{} });
+    navigator.mediaSession.setActionHandler('pause',       ()=>{ audio.pause(); });
+    navigator.mediaSession.setActionHandler('previoustrack',()=>{ prev(); });
+    navigator.mediaSession.setActionHandler('nexttrack',    ()=>{ next(); });
+
+    navigator.mediaSession.setActionHandler('seekto', (d)=>{
+      if (d?.seekTime != null) {
+        audio.currentTime = Math.max(0, Math.min(audio.duration||0, d.seekTime));
+      }
+      updatePlaybackState();
+    });
+    navigator.mediaSession.setActionHandler('seekbackward', (d)=>{
+      const s = d?.seekOffset || 5; audio.currentTime = Math.max(0, audio.currentTime - s); updatePlaybackState();
+    });
+    navigator.mediaSession.setActionHandler('seekforward',  (d)=>{
+      const s = d?.seekOffset || 5; audio.currentTime = Math.min(audio.duration||0, audio.currentTime + s); updatePlaybackState();
+    });
+  }catch{}
+}
+
+// 與播放器事件同步系統卡片狀態
+audio.addEventListener('play',           ()=>{ updatePlaybackState(); });
+audio.addEventListener('pause',          ()=>{ updatePlaybackState(); });
+audio.addEventListener('timeupdate',     ()=>{ updatePlaybackState(); });
+audio.addEventListener('durationchange', ()=>{ updatePlaybackState(); });
 
 export { audio, PAGE_BASE };

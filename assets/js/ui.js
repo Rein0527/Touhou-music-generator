@@ -3,14 +3,21 @@ const elPlaylist = document.getElementById("playlist");
 const elSettings = document.getElementById("settings");
 const elTrackList = document.getElementById("trackList");
 
-document.getElementById("toggleList").onclick = () => { elPlaylist.classList.add("show"); window.renderList?.(); };
+document.getElementById("toggleList").onclick = () => {
+  elPlaylist.classList.add("show"); window.renderList?.();
+};
 document.getElementById("closeList").onclick  = () => { elPlaylist.classList.remove("show"); };
+// 點遮罩關閉（點到面板本體不關）
+elPlaylist.addEventListener('click', (e)=>{
+  if (e.target === elPlaylist) elPlaylist.classList.remove('show');
+});
 
 document.getElementById("toggleSettings").onclick = () => {
   // 初始化 switch 狀態
-  const st = window.playerState;
-  document.getElementById("toggleShuffleSwitch").checked = !!st?.shuffle;
-  document.getElementById("toggleRepeatSwitch").checked  = !!st?.repeat;
+  const st = window.playerState || {};
+  document.getElementById("toggleShuffleSwitch").checked = !!st.shuffle;
+  document.getElementById("toggleRepeatSwitch").checked  = !!st.repeat;
+
   // 讀回偏好
   try{
     const pref = JSON.parse(localStorage.getItem("touhou_player_pref")||"{}");
@@ -22,8 +29,12 @@ document.getElementById("toggleSettings").onclick = () => {
   elSettings.classList.add("show");
 };
 document.getElementById("closeSettings").onclick = () => { elSettings.classList.remove("show"); };
+// 點遮罩關閉
+elSettings.addEventListener('click', (e)=>{
+  if (e.target === elSettings) elSettings.classList.remove('show');
+});
 
-// 設定面板的左右開關：寫回 playerState + 儲存
+// 設定面板：寫回 playerState + 儲存偏好
 function savePref(){
   const pref = {
     shuffle: !!document.getElementById("toggleShuffleSwitch").checked,
@@ -37,7 +48,7 @@ function savePref(){
     st.shuffle = pref.shuffle;
     st.repeat  = pref.repeat;
   }
-  // 背景輪播設定（如需在此即時生效，可在 player.js 內提供 hooks；此處先保存偏好）
+  // TODO：如需即時影響背景輪播，可在這裡呼叫對應 hook
 }
 
 ["toggleShuffleSwitch","toggleRepeatSwitch","bgTag","bgInterval"].forEach(id=>{

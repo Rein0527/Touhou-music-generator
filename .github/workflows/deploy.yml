@@ -1,86 +1,164 @@
-- name: Generate data/tracks.json & images.json
-  shell: bash
-  run: |
-    set -euo pipefail
-    mkdir -p data scripts
-    cat > scripts/gen.mjs << 'EOF'
-    import fs from 'node:fs';
-    import path from 'node:path';
+name: Build & Deploy Touhou Player
 
-    const musicRoot = path.join(process.cwd(),'music');
-    const dataDir   = path.join(process.cwd(),'data');
-    const exts = new Set(['.mp3','.ogg','.wav','.m4a','.flac']);
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
 
-    function walk(dir){
-      let out = [];
-      if (!fs.existsSync(dir)) return out;
-      for (const name of fs.readdirSync(dir)){
-        if (name.startsWith('.')) continue;
-        const p = path.join(dir, name);
-        const st = fs.statSync(p);
-        if (st.isDirectory()) out = out.concat(walk(p));
-        else if (exts.has(path.extname(name).toLowerCase())) out.push(p);
-      }
-      return out;
-    }
+permissions:
+  contents: read
+  pages: write
+  id-token: write
 
-    // ---- tracks.json ----
-    let relFiles = [];
-    if (fs.existsSync(musicRoot)) {
-      relFiles = walk(musicRoot).map(abs =>
-        path.posix.join('music', path.relative(musicRoot, abs).split(path.sep).join('/'))
-      );
-    } else {
-      console.log('⚠️  沒有 /music 目錄，tracks.json 將為空陣列');
-    }
+concurrency:
+  group: "pages"
+  cancel-in-progress: true
 
-    function sanitizeTag(s){ return s.toLowerCase().replace(/[^a-z0-9_\-]/g,'').slice(0,40); }
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
 
-    const tracks = relFiles.map(rel => {
-      const base = path.basename(rel).replace(/\.[^.]+$/,'');
-      let artist='Unknown', title=base;
-      const m = base.split(' - ');
-      if (m.length>=2){ artist=m[0]; title=m.slice(1).join(' - '); }
-      const segs = rel.split('/').slice(1,-1); // e.g. [ 'th10' ]
-      const dirTags = segs.map(sanitizeTag).filter(Boolean);
-      const nameTags = base.split(/[^a-zA-Z0-9]+/).map(sanitizeTag).filter(Boolean);
-      const set = new Set(['touhou', ...dirTags, ...nameTags]);
-      return { file: rel, title, artist, tags: [...set].slice(0,8) };
-    });
+      - name: Env info (Node/Bash)
+        run: |
+          node -v
+          npm -v || true
+          bash --version
+          echo "Workspace:"; ls -la
 
-    fs.writeFileSync(path.join(dataDir,'tracks.json'), JSON.stringify(tracks, null, 2));
-    console.log('✅ tracks.json 產生完成，曲目數：', tracks.length);
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
 
-    // ---- images.json ----
-    const tagSet = new Set(['touhou']);
-    tracks.forEach(t => (t.tags||['touhou']).forEach(tag => tagSet.add(tag)));
+      - name: Verify project layout
+        run: |
+          echo "Root listing:"; ls -la
+          echo "music/ listing:"; ls -la music || echo "(no music dir)"
+          echo "data/ listing:"; ls -la data || echo "(no data dir yet)"
 
-    const images = {};
-    for (const tag of tagSet) {
-      try {
-        const url = `https://danbooru.donmai.us/posts.json?limit=30&tags=${encodeURIComponent(tag + ' rating:safe order:rank')}`;
-        const res = await fetch(url, { headers: { 'User-Agent': 'GitHubActions/1.0 (+pages)' }});
-        if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
-        const arr = await res.json();
-        const seen = new Set(); const list = [];
-        for (const p of arr) {
-          const u = p.large_file_url || p.file_url;
-          if (!u || p.rating !== 's') continue;
-          const abs = u.startsWith('http') ? u : `https://danbooru.donmai.us${u}`;
-          if (seen.has(abs)) continue;
-          seen.add(abs);
-          list.push({ url: abs, source: `post:${p.id}` });
-        }
-        images[tag] = list;
-        console.log(`🖼️  ${tag}: ${list.length} 張`);
-        await new Promise(r => setTimeout(r, 250)); // 輕微節流
-      } catch (err) {
-        console.log('⚠️  產生圖片失敗：', tag, err.message);
-        images[tag] = images[tag] || [];
-      }
-    }
-    fs.writeFileSync(path.join(dataDir,'images.json'), JSON.stringify(images, null, 2));
-    console.log('✅ images.json 產生完成');
-    EOF
+      - name: Generate data/tracks.json & images.json
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p data scripts
+          cat > scripts/gen.mjs << 'EOF'
+          import fs from 'node:fs';
+          import path from 'node:path';
 
-    node scripts/gen.mjs
+          const musicRoot = path.join(process.cwd(),'music');
+          const dataDir   = path.join(process.cwd(),'data');
+          const exts = new Set(['.mp3','.ogg','.wav','.m4a','.flac']);
+
+          function walk(dir){
+            let out = [];
+            if (!fs.existsSync(dir)) return out;
+            for (const name of fs.readdirSync(dir)){
+              if (name.startsWith('.')) continue;
+              const p = path.join(dir, name);
+              const st = fs.statSync(p);
+              if (st.isDirectory()) out = out.concat(walk(p));
+              else if (exts.has(path.extname(name).toLowerCase())) out.push(p);
+            }
+            return out;
+          }
+
+          // ---- tracks.json ----
+          let relFiles = [];
+          if (fs.existsSync(musicRoot)) {
+            relFiles = walk(musicRoot).map(abs =>
+              path.posix.join('music', path.relative(musicRoot, abs).split(path.sep).join('/'))
+            );
+          } else {
+            console.log('⚠️  沒有 /music 目錄，tracks.json 將為空陣列');
+          }
+
+          function sanitizeTag(s){ return s.toLowerCase().replace(/[^a-z0-9_\-]/g,'').slice(0,40); }
+
+          const tracks = relFiles.map(rel => {
+            const base = path.basename(rel).replace(/\.[^.]+$/,'');
+            let artist='Unknown', title=base;
+            const m = base.split(' - ');
+            if (m.length>=2){ artist=m[0]; title=m.slice(1).join(' - '); }
+            const segs = rel.split('/').slice(1,-1); // e.g. [ 'th10' ]
+            const dirTags = segs.map(sanitizeTag).filter(Boolean);
+            const nameTags = base.split(/[^a-zA-Z0-9]+/).map(sanitizeTag).filter(Boolean);
+            const set = new Set(['touhou', ...dirTags, ...nameTags]);
+            return { file: rel, title, artist, tags: [...set].slice(0,8) };
+          });
+
+          fs.writeFileSync(path.join(dataDir,'tracks.json'), JSON.stringify(tracks, null, 2));
+          console.log('✅ tracks.json 產生完成，曲目數：', tracks.length);
+
+          // ---- images.json ----
+          const tagSet = new Set(['touhou']);
+          tracks.forEach(t => (t.tags||['touhou']).forEach(tag => tagSet.add(tag)));
+
+          const images = {};
+          for (const tag of tagSet) {
+            try {
+              const url = `https://danbooru.donmai.us/posts.json?limit=30&tags=${encodeURIComponent(tag + ' rating:safe order:rank')}`;
+              const res = await fetch(url, { headers: { 'User-Agent': 'GitHubActions/1.0 (+pages)' }});
+              if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
+              const arr = await res.json();
+              const seen = new Set(); const list = [];
+              for (const p of arr) {
+                const u = p.large_file_url || p.file_url;
+                if (!u || p.rating !== 's') continue;
+                const abs = u.startsWith('http') ? u : `https://danbooru.donmai.us${u}`;
+                if (seen.has(abs)) continue;
+                seen.add(abs);
+                list.push({ url: abs, source: `post:${p.id}` });
+              }
+              images[tag] = list;
+              console.log(`🖼️  ${tag}: ${list.length} 張`);
+              await new Promise(r => setTimeout(r, 250)); // 輕微節流
+            } catch (err) {
+              console.log('⚠️  產生圖片失敗：', tag, err.message);
+              images[tag] = images[tag] || [];
+            }
+          }
+          fs.writeFileSync(path.join(dataDir,'images.json'), JSON.stringify(images, null, 2));
+          console.log('✅ images.json 產生完成');
+          EOF
+
+          node scripts/gen.mjs
+
+      - name: Sanity check artifacts
+        run: |
+          echo "--- data dir ---"; ls -la data || true
+          echo "--- tracks head ---"; (head -n 20 data/tracks.json || true)
+          echo "--- images head ---"; (head -n 20 data/images.json || true)
+
+      - name: Prepare artifact
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          shopt -s dotglob extglob
+          for f in * .*; do
+            [[ "$f" == "." || "$f" == ".." || "$f" == "dist" ]] && continue
+            cp -r "$f" dist/ || true
+          done
+          echo "Dist listing:"; ls -la dist; ls -la dist/data || true
+
+      - name: Configure Pages
+        uses: actions/configure-pages@v5
+
+      - name: Upload artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: dist
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4

@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Touhou Player — M1+M2 MVP (Rev E)</title>
+  <title>Touhou Player — M1+M2 MVP (Rev F)</title>
   <style>
     :root { --bg-fade-ms:850; --text:#edeef2; --muted:#9aa3b2; --panel:rgba(16,18,24,.55); --border:rgba(148,163,184,.16); }
     html,body{height:100%;margin:0;background:#0b0d12;color:var(--text);font-family:ui-sans-serif,system-ui,-apple-system,Segoe UI,Roboto,"Noto Sans","PingFang TC","Microsoft JhengHei",Arial;}
@@ -14,8 +14,11 @@
     .stage{position:relative;z-index:10;display:grid;place-items:center;min-height:72vh;padding-top:5vh;}
     canvas{width:min(78vmin,1040px);height:min(78vmin,1040px);aspect-ratio:1/1;touch-action:none;}
     .bar{position:fixed;left:0;right:0;bottom:0;z-index:20;display:grid;grid-template-columns:auto 1fr auto auto;gap:14px;align-items:center;padding:12px clamp(14px,3vw,24px);backdrop-filter:blur(8px);background:var(--panel);border-top:1px solid var(--border);}
-    .meta{min-width:200px;overflow:hidden}.title{font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.artist{color:var(--muted);font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-    .controls{display:inline-flex;gap:10px}.btn{appearance:none;border:1px solid rgba(148,163,184,.22);color:var(--text);background:linear-gradient(180deg,rgba(33,41,54,.65),rgba(18,23,33,.65));padding:10px 12px;border-radius:12px;font-size:14px;cursor:pointer;user-select:none}
+    .meta{min-width:200px;overflow:hidden}
+    .title{font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+    .artist{color:var(--muted);font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+    .controls{display:inline-flex;gap:10px}
+    .btn{appearance:none;border:1px solid rgba(148,163,184,.22);color:var(--text);background:linear-gradient(180deg,rgba(33,41,54,.65),rgba(18,23,33,.65));padding:10px 12px;border-radius:12px;font-size:14px;cursor:pointer;user-select:none}
     .btn.icon{width:44px;height:44px;display:grid;place-items:center;font-size:18px}
     .vol{display:inline-flex;align-items:center;gap:8px;font-size:12px;color:var(--muted)}.vol input{width:140px}
     .filepick{font-size:12px;opacity:.85}
@@ -54,7 +57,7 @@
     <div class="dropmask" id="dropmask">拖放音檔到這裡以加入播放</div>
   </div>
 
-  <!-- audio（同源） -->
+  <!-- audio（同源，不需 CORS） -->
   <audio id="audio"></audio>
 
   <script>
@@ -64,8 +67,8 @@
     queue: [], qIndex: 0,
     playing: false,
     imagesByTag: {}, currentImages: [], bgIdx: 0, bgTimer: null, bgIntervalMs: 15000,
-    pendingSeekPct: null,             // 等 metadata 後套用
-    loadedQi: null                    // 目前已載入到 <audio> 的 queue index
+    pendingSeekPct: null,   // 讀取中先記住欲 seek 的百分比
+    loadedQi: null          // 目前已載入到 <audio> 的 queue index
   };
 
   // ===== DOM =====
@@ -77,11 +80,29 @@
   const elFile=$("fileInput"), elVol=$("volume");
   const dropmask=$("dropmask"); const bg=$("bg"), bgNext=$("bgNext");
 
-  // ===== 首次互動：保證 AudioContext 啟動 =====
-  let audioCtx, analyser, sourceNode, rafId=0, firstInteraction=false;
-  function ensureAudioGraph(){ if(!audioCtx){ audioCtx=new (window.AudioContext||window.webkitAudioContext)(); analyser=audioCtx.createAnalyser(); analyser.fftSize=2048; analyser.smoothingTimeConstant=0.8; sourceNode=audioCtx.createMediaElementSource(elAudio); sourceNode.connect(analyser); analyser.connect(audioCtx.destination);} }
-  function ensureInteract(){ if(firstInteraction) return; try{ ensureAudioGraph(); if(audioCtx.state==='suspended') audioCtx.resume(); }catch{} firstInteraction=true; }
-  ['click','keydown','pointerdown','touchstart'].forEach(ev => window.addEventListener(ev, ensureInteract, {passive:true}));
+  // ===== AudioContext：只在使用者手勢內 resume =====
+  let audioCtx, analyser, sourceNode, rafId = 0;
+  let interacted = false;
+
+  function ensureAudioGraph() {
+    if (!audioCtx) {
+      audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+      analyser = audioCtx.createAnalyser();
+      analyser.fftSize = 2048;
+      analyser.smoothingTimeConstant = 0.8;
+      sourceNode = audioCtx.createMediaElementSource(elAudio);
+      sourceNode.connect(analyser);
+      analyser.connect(audioCtx.destination);
+    }
+  }
+  async function resumeOnGesture() {
+    ensureAudioGraph();
+    try { if (audioCtx.state === 'suspended') await audioCtx.resume(); } catch {}
+    interacted = true;
+  }
+  ['click','keydown','pointerdown','touchstart'].forEach(ev => {
+    window.addEventListener(ev, () => { if (!interacted) resumeOnGesture(); }, { passive: true });
+  });
 
   // ===== 載入資料 =====
   async function loadJSON(path){ try{ const res=await fetch(path,{cache:'no-store'}); if(!res.ok) throw 0; return await res.json(); } catch { return null; } }
@@ -94,12 +115,12 @@
   function resolveByQi(qi){ const gi=STATE.queue[qi], base=STATE.tracks.length; return gi<base?{...STATE.tracks[gi],isLocal:false}:{...STATE.localTracks[gi-base],isLocal:true}; }
   function currentTrack(){ return resolveByQi(STATE.qIndex); }
 
-  // ===== 載入音源（僅換歌時） =====
+  // ===== 載入音源（只在換歌時）=====
   function ensureTrackLoaded(qi){
-    if (STATE.loadedQi === qi) return true;       // 同一首，不重載
+    if (STATE.loadedQi === qi) return true; // 同一首，不重載
     const t = resolveByQi(qi);
     if (!t || !t.file) return false;
-    const src = encodeURI(t.file);                // 重要：避免空白/特殊字元
+    const src = encodeURI(t.file);          // 避免空白/特殊字元
     elAudio.src = src;
     try { elAudio.load(); } catch {}
     STATE.loadedQi = qi;
@@ -108,13 +129,13 @@
 
   // ===== 播放控制 =====
   function playCurrent(){
-    // 若是暫停後繼續：不要重新載入，直接 play
+    // 暫停→繼續：直接 play（不重載）
     if (STATE.loadedQi === STATE.qIndex && !elAudio.ended && elAudio.currentTime > 0) {
       return elAudio.play().then(()=>{ STATE.playing=true; elPlay.textContent='⏸'; startAfterPlay(); }).catch(fallbackNext);
     }
-
-    // 換歌或尚未載入：載入並等待可播放
+    // 換歌或尚未載入：先載入再等可播
     if (!ensureTrackLoaded(STATE.qIndex)) return;
+
     const onLoadedMeta = () => {
       if (Number.isFinite(elAudio.duration) && elAudio.duration>0 && STATE.pendingSeekPct!=null) {
         elAudio.currentTime = Math.max(0, Math.min(elAudio.duration*STATE.pendingSeekPct, elAudio.duration-0.01));
@@ -132,9 +153,10 @@
       elAudio.addEventListener('abort', ng, {once:true});
       setTimeout(()=>resolve(), 3500); // 雙保險
     });
-    waitReady.then(async()=>{ try{ if(audioCtx && audioCtx.state==='suspended') await audioCtx.resume(); }catch{} return elAudio.play(); })
-             .then(()=>{ STATE.playing=true; elPlay.textContent='⏸'; startAfterPlay(); })
-             .catch(fallbackNext);
+    waitReady
+      .then(() => elAudio.play())   // 這裡不再 resume，resume 僅在手勢內
+      .then(()=>{ STATE.playing=true; elPlay.textContent='⏸'; startAfterPlay(); })
+      .catch(fallbackNext);
   }
   function startAfterPlay(){ updateMeta(); refreshBackgroundPool(); startViz(); }
   function fallbackNext(err){ console.warn('play error',err); next(); }
@@ -153,19 +175,23 @@
       rafId=requestAnimationFrame(loop); if(!analyser) return;
       analyser.getByteFrequencyData(data); ctx.clearRect(0,0,W,H);
       const step=Math.floor(data.length/freqBins);
-      for(let i=0;i<freqBins;i++){ const v=data[i*step]/255, bar=24+v*160, a=(i/freqBins)*Math.PI*2;
+      for(let i=0;i<freqBins;i++){
+        const v=data[i*step]/255, bar=24+v*160, a=(i/freqBins)*Math.PI*2;
         const x1=cx+Math.cos(a)*radius, y1=cy+Math.sin(a)*radius, x2=cx+Math.cos(a)*(radius+bar), y2=cy+Math.sin(a)*(radius+bar);
-        ctx.strokeStyle=`rgba(255,255,255,${.3+v*.55})`; ctx.lineWidth=3.5; ctx.beginPath(); ctx.moveTo(x1,y1); ctx.lineTo(x2,y2); ctx.stroke(); }
+        ctx.strokeStyle=`rgba(255,255,255,${.3+v*.55})`; ctx.lineWidth=3.5;
+        ctx.beginPath(); ctx.moveTo(x1,y1); ctx.lineTo(x2,y2); ctx.stroke();
+      }
       const d=elAudio.duration||0, ct=elAudio.currentTime||0, p=d>0?ct/d:0;
       const startA=-Math.PI/2, endA=startA+p*Math.PI*2;
-      ctx.strokeStyle="rgba(255,255,255,.18)"; ctx.lineWidth=progressThick; ctx.beginPath(); ctx.arc(cx,cy,progressOuter,0,Math.PI*2); ctx.stroke();
+      ctx.strokeStyle="rgba(255,255,255,.18)"; ctx.lineWidth=progressThick;
+      ctx.beginPath(); ctx.arc(cx,cy,progressOuter,0,Math.PI*2); ctx.stroke();
       const g=ctx.createLinearGradient(cx-progressOuter,cy-progressOuter,cx+progressOuter,cy+progressOuter); g.addColorStop(0,"#ff8bd1"); g.addColorStop(1,"#6da8ff");
       ctx.strokeStyle=g; ctx.lineCap="round"; ctx.beginPath(); ctx.arc(cx,cy,progressOuter,startA,endA,false); ctx.stroke();
       const hx=cx+Math.cos(endA)*progressOuter, hy=cy+Math.sin(endA)*progressOuter; ctx.fillStyle="#fff"; ctx.beginPath(); ctx.arc(hx,hy,5.5,0,Math.PI*2); ctx.fill();
     })();
   }
 
-  // ===== 舞台點擊/拖曳快轉（含待處理快轉） =====
+  // ===== 舞台點擊/拖曳快轉（含待處理快轉）=====
   let dragging=false, startX=0, startTime=0, pendingSeek=null, scrubRaf=0, lowFps=false;
   function canvasX(e){ const r=elCanvas.getBoundingClientRect(); return (e.clientX-r.left)*(elCanvas.width/r.width); }
   function width(){ return elCanvas.width; }
@@ -179,10 +205,17 @@
     if(typeof elAudio.fastSeek==='function'){ try{ elAudio.fastSeek(pendingSeek);}catch{ elAudio.currentTime=pendingSeek; } }
     else elAudio.currentTime=pendingSeek; pendingSeek=null; }
 
-  elCanvas.addEventListener('pointerdown', e=>{ ensureInteract(); elCanvas.setPointerCapture(e.pointerId); dragging=true; startX=canvasX(e); startTime=elAudio.currentTime||0; seekAbsoluteByX(startX); if(!lowFps&&analyser){ analyser.smoothingTimeConstant=0.9; lowFps=true; } });
+  elCanvas.addEventListener('pointerdown', async e=>{
+    await resumeOnGesture();
+    elCanvas.setPointerCapture(e.pointerId);
+    dragging=true; startX=canvasX(e); startTime=elAudio.currentTime||0;
+    seekAbsoluteByX(startX); // 點一下就定位
+    if(!lowFps&&analyser){ analyser.smoothingTimeConstant=0.9; lowFps=true; }
+  });
   elCanvas.addEventListener('pointermove', e=>{ if(!dragging) return; const x=canvasX(e); seekRelativeByDX(x-startX); });
   function endDrag(e){ if(!dragging) return; dragging=false; try{ elCanvas.releasePointerCapture(e.pointerId);}catch{} if(lowFps&&analyser){analyser.smoothingTimeConstant=0.8; lowFps=false;} }
-  elCanvas.addEventListener('pointerup', endDrag); elCanvas.addEventListener('pointercancel', endDrag);
+  elCanvas.addEventListener('pointerup', endDrag);
+  elCanvas.addEventListener('pointercancel', endDrag);
 
   // ===== 背景輪播 =====
   function refreshBackgroundPool(){ const t=currentTrack(); const tags=(t&&Array.isArray(t.tags)&&t.tags.length)?t.tags:['touhou']; const pool=[], seen=new Set();
@@ -195,21 +228,23 @@
   function updateMeta(){ const t=currentTrack(); elTitle.textContent=t?(t.title||t.file.split('/').pop()):'—'; elArtist.textContent=t?(t.artist||(t.isLocal?'(Local)':'Unknown')):'—'; }
   function toast(m){ console.log(m); }
 
-  elPrev.addEventListener('click', ()=>{ ensureInteract(); prev(); });
-  elNext.addEventListener('click', ()=>{ ensureInteract(); next(); });
-  elPlay.addEventListener('click', async ()=>{ ensureInteract(); try{ if(audioCtx&&audioCtx.state==='suspended') await audioCtx.resume(); }catch{} togglePlay(); });
+  // 控制鍵（手勢內 resume）
+  elPrev.addEventListener('click', async ()=>{ await resumeOnGesture(); prev(); });
+  elNext.addEventListener('click', async ()=>{ await resumeOnGesture(); next(); });
+  elPlay.addEventListener('click', async ()=>{ await resumeOnGesture(); togglePlay(); });
   elVol.addEventListener('input', ()=>{ elAudio.volume=parseFloat(elVol.value); });
 
+  // 音訊事件
   elAudio.addEventListener('ended', next);
   elAudio.addEventListener('error', ()=> next());
   elAudio.addEventListener('stalled', ()=> next());
   elAudio.addEventListener('abort', ()=> next());
 
-  // 鍵盤
-  window.addEventListener('keydown', e=>{
-    if(e.code==='Space'){ e.preventDefault(); ensureInteract(); togglePlay(); }
-    else if(e.key==='a'||e.key==='A'){ ensureInteract(); prev(); }
-    else if(e.key==='d'||e.key==='D'){ ensureInteract(); next(); }
+  // 鍵盤（手勢內 resume）
+  window.addEventListener('keydown', async e=>{
+    if(e.code==='Space'){ e.preventDefault(); await resumeOnGesture(); togglePlay(); }
+    else if(e.key==='a'||e.key==='A'){ await resumeOnGesture(); prev(); }
+    else if(e.key==='d'||e.key==='D'){ await resumeOnGesture(); next(); }
     else if(e.key==='ArrowLeft'){ elAudio.currentTime=Math.max(0,elAudio.currentTime-(e.ctrlKey?15:5)); }
     else if(e.key==='ArrowRight'){ elAudio.currentTime=Math.min(elAudio.duration||1e9,elAudio.currentTime+(e.ctrlKey?15:5)); }
   });

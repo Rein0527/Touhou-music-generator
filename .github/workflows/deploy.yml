@@ -26,21 +26,30 @@ jobs:
         with:
           node-version: 20
 
-      - name: Generate tracks.json & images.json
+      - name: Generate data/tracks.json & images.json
         run: |
+          set -euo pipefail
           mkdir -p data
           node --input-type=module - <<'NODE'
-          import fs from 'fs';
-          import path from 'path';
+          import fs from 'node:fs';
+          import path from 'node:path';
+          import process from 'node:process';
+
+          // ---- GitHub Pages base path ----
+          const repoFull = process.env.GITHUB_REPOSITORY || '';          // e.g. user/Touhou-music-generator
+          const repoName = repoFull.split('/')[1] || '';
+          const pagesBase = repoName.endsWith('.github.io') ? '/' : `/${repoName}/`;
 
           const musicRoot = path.join(process.cwd(),'music');
           const dataDir   = path.join(process.cwd(),'data');
           const exts = new Set(['.mp3','.ogg','.wav','.m4a','.flac']);
 
+          const stripLeadingIndex = (s) => s.replace(/^\s*\d+\s*[.\-＿．]?\s*/u,'').trim();
+
           function walk(dir){
             let out = [];
             if (!fs.existsSync(dir)) return out;
-            for (const name of fs.readdirSync(dir)){
+            for (const name of fs.readdirSync(dir)) {
               if (name.startsWith('.')) continue;
               const p = path.join(dir, name);
               const st = fs.statSync(p);
@@ -53,67 +62,76 @@ jobs:
             return out;
           }
 
-          // 產生 tracks.json
-          let relFiles = [];
-          if (fs.existsSync(musicRoot)) {
-            relFiles = walk(musicRoot).map(abs =>
-              path.posix.join('music', path.relative(musicRoot, abs).split(path.sep).join('/'))
-            );
-          }
-          const tracks = relFiles.map(rel => {
-            const base = path.basename(rel).replace(/\.[^.]+$/,'');
-            let artist='Unknown', title=base;
-            const m = base.split(' - ');
-            if (m.length>=2){ artist=m[0]; title=m.slice(1).join(' - '); }
-            return { file: rel, title, artist };
-          });
-          fs.writeFileSync(path.join(dataDir,'tracks.json'), JSON.stringify(tracks,null,2));
-          console.log('✅ tracks.json generated:', tracks.length, 'tracks');
+          // ---- tracks.json ----
+          let files = [];
+          if (fs.existsSync(musicRoot)) files = walk(musicRoot);
 
-          // 產生 images.json（從 tags 抓 Danbooru）
+          // 相對路徑 → 帶上 Pages base（專案頁會是 /repo/...；個人頁是 /...）
+          const tracks = files.map(abs => {
+            const rel = path.posix.join('music', path.relative(musicRoot, abs).split(path.sep).join('/'));
+            const fileURL = pagesBase + rel;                 // 這行是關鍵：補上 base 路徑
+            const base = stripLeadingIndex(path.basename(rel).replace(/\.[^.]+$/,''));
+            // 不需要 artist；title 去除前綴編號
+            return { file: fileURL, title: base, artist: "" };
+          });
+
+          fs.writeFileSync(path.join(dataDir,'tracks.json'), JSON.stringify(tracks, null, 2));
+          console.log(`✅ tracks.json generated: ${tracks.length} tracks`);
+
+          // ---- images.json（簡化：touhou 一組 tags；可再擴充）----
           const tags = new Set(['touhou']);
-          tracks.forEach(t=>tags.add('touhou'));
           const images = {};
           for (const tag of tags) {
             try {
-              const url = `https://danbooru.donmai.us/posts.json?limit=30&tags=${encodeURIComponent(tag+' rating:safe order:rank')}`;
-              const res = await fetch(url, { headers: { 'User-Agent': 'GitHubActions' }});
-              if (!res.ok) throw new Error(res.statusText);
+              const url = `https://danbooru.donmai.us/posts.json?limit=30&tags=${encodeURIComponent(tag + ' rating:safe order:rank')}`;
+              const res = await fetch(url, { headers: { 'User-Agent': 'GitHubActions/1.0 (+pages)' }});
+              if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
               const arr = await res.json();
-              const seen = new Set(); const list=[];
+              const seen = new Set(); const list = [];
               for (const p of arr) {
                 const u = p.large_file_url || p.file_url;
-                if (!u || p.rating!=='s') continue;
+                if (!u || p.rating !== 's') continue;
                 const abs = u.startsWith('http') ? u : `https://danbooru.donmai.us${u}`;
                 if (seen.has(abs)) continue;
                 seen.add(abs);
-                list.push({url:abs, source:`post:${p.id}`});
+                list.push({ url: abs, source: `post:${p.id}` });
               }
-              images[tag]=list;
-              console.log(`🖼️ ${tag}: ${list.length} images`);
-              await new Promise(r=>setTimeout(r,300));
-            } catch(e){
-              console.log('⚠️ image fetch failed for', tag, e.message);
-              images[tag]=[];
+              images[tag] = list;
+              console.log(`🖼️  ${tag}: ${list.length} images`);
+              await new Promise(r => setTimeout(r, 250));
+            } catch (e) {
+              console.log('⚠️  image fetch failed for', tag, e.message);
+              images[tag] = images[tag] || [];
             }
           }
-          fs.writeFileSync(path.join(dataDir,'images.json'), JSON.stringify(images,null,2));
+          fs.writeFileSync(path.join(dataDir,'images.json'), JSON.stringify(images, null, 2));
           console.log('✅ images.json generated');
           NODE
 
       - name: Sanity check
         run: |
-          echo "--- data ---"
-          ls -l data
-          head -n 10 data/tracks.json || true
-          head -n 10 data/images.json || true
+          echo '--- data dir ---'
+          ls -la data || true
+          echo '--- tracks.json head ---'
+          (head -n 20 data/tracks.json || true)
+          echo '--- images.json head ---'
+          (head -n 20 data/images.json || true)
 
-      - name: Prepare artifact
+      - name: Prepare artifact (include data/)
         run: |
+          set -euo pipefail
           mkdir -p dist
-          shopt -s extglob
-          cp -r !(dist|.git|.github) dist/ || true
-          cp -r .github dist/.github || true
+          rsync -av --delete \
+            --exclude 'dist' \
+            --exclude '.git' \
+            --exclude '.github' \
+            ./ dist/
+          # 確保 data/ 一定存在於 dist
+          test -d dist/data || mkdir -p dist/data
+          cp -f data/tracks.json dist/data/tracks.json
+          cp -f data/images.json dist/data/images.json
+          # 可選：若你需要保留 README.md 也一起帶上
+          [ -f data/README.md ] && cp -f data/README.md dist/data/README.md || true
 
       - name: Configure Pages
         uses: actions/configure-pages@v5

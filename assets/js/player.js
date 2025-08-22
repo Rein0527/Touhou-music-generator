@@ -1,115 +1,138 @@
-// 播放器核心：載入清單 / 控制播放 / 空白鍵 / 下壓動畫
-const elAudio = document.getElementById("audio");
-const elPlay  = document.getElementById("play");
-const elPrev  = document.getElementById("prev");
-const elNext  = document.getElementById("next");
-const elVol   = document.getElementById("volume");
-const elTrackList = document.getElementById("trackList");
+document.addEventListener("DOMContentLoaded", () => {
+  const playlistBtn = document.getElementById("playlistBtn");
+  const playlistPanel = document.getElementById("playlistPanel");
+  const closePlaylist = document.getElementById("closePlaylist");
 
-let tracks = [];
-let qIndex = 0;
+  const settingsBtn = document.getElementById("settingsBtn");
+  const settingsPanel = document.getElementById("settingsPanel");
+  const closeSettings = document.getElementById("closeSettings");
 
-// 播放模式 state（由設定面板控制）
-let shuffle = false, repeat = false;
-window.playerState = {
-  get shuffle(){ return shuffle; }, set shuffle(v){ shuffle = !!v; },
-  get repeat(){  return repeat;  }, set repeat(v){  repeat  = !!v; }
-};
+  const muteBtn = document.getElementById("muteBtn");
+  const volumeSlider = document.getElementById("volume");
+  const audio = document.getElementById("audio");
 
-// 載入偏好
-(function loadPref(){
-  try{
-    const pref = JSON.parse(localStorage.getItem("touhou_player_pref")||"{}");
-    if (typeof pref.shuffle === "boolean") shuffle = pref.shuffle;
-    if (typeof pref.repeat  === "boolean") repeat  = pref.repeat;
-  }catch{}
-})();
+  const toggleRepeat = document.getElementById("toggleRepeat");
+  const toggleShuffle = document.getElementById("toggleShuffle");
 
-async function loadTracks(){
-  try{
-    const res = await fetch("data/tracks.json", { cache:"no-store" });
-    if (!res.ok) throw 0;
-    tracks = await res.json();
-  }catch{ tracks = []; }
-  renderList();
-  if(tracks.length>0) loadTrack(0);
-}
+  let lastVolume = 1;
 
-function enc(u){ try { return encodeURI(u); } catch { return u; } }
+  // 狀態
+  const STATE = {
+    tracks: [],         // 全部曲目
+    queue: [],          // 播放序列
+    qIndex: 0,          // 當前位置
+    repeatMode: "off",  // "off" | "one" | "all"
+    shuffle: false,
+  };
 
-function loadTrack(i){
-  if (!tracks.length) return;
-  qIndex = (i + tracks.length) % tracks.length;
-  const t = tracks[qIndex];
-  elAudio.src = enc(t.file);
-  window.__viz?.bindAudio(elAudio);
-  elAudio.play().catch(()=>{});
-  renderList();
-}
-
-function renderList(){
-  if (!elTrackList) return;
-  elTrackList.innerHTML = "";
-  tracks.forEach((t,i)=>{
-    const li = document.createElement("li");
-    li.textContent = t.title || t.file.split("/").pop();
-    if (i === qIndex) li.style.color = "var(--accent)";
-    li.onclick = async () => { await window.__viz?.resumeOnGesture(); loadTrack(i); };
-    elTrackList.appendChild(li);
+  // ===== 播放清單控制 =====
+  playlistBtn.addEventListener("click", () => {
+    playlistPanel.classList.toggle("open");
   });
-}
-// 讓 ui.js 可手動觸發重繪
-window.renderList = renderList;
+  closePlaylist.addEventListener("click", () => {
+    playlistPanel.classList.remove("open");
+  });
 
-function togglePlay(){
-  // 播放鍵短促「下壓」動畫
-  elPlay.classList.add("tapping");
-  setTimeout(()=> elPlay.classList.remove("tapping"), 120);
+  // ===== 設定控制 =====
+  settingsBtn.addEventListener("click", () => {
+    settingsPanel.classList.toggle("open");
+  });
+  closeSettings.addEventListener("click", () => {
+    settingsPanel.classList.remove("open");
+  });
 
-  if (elAudio.paused) elAudio.play().catch(()=>{});
-  else elAudio.pause();
-}
+  // 循環模式
+  toggleRepeat.addEventListener("change", () => {
+    STATE.repeatMode = toggleRepeat.checked ? "all" : "off";
+    console.log("Repeat mode:", STATE.repeatMode);
+  });
 
-elPlay.onclick = async () => { await window.__viz?.resumeOnGesture(); togglePlay(); };
-elPrev.onclick = async () => { await window.__viz?.resumeOnGesture(); loadTrack(qIndex-1); };
-elNext.onclick = async () => { await window.__viz?.resumeOnGesture(); loadTrack(qIndex+1); };
+  // 隨機模式
+  toggleShuffle.addEventListener("change", () => {
+    STATE.shuffle = toggleShuffle.checked;
+    rebuildQueue();
+    console.log("Shuffle:", STATE.shuffle);
+  });
 
-elAudio.onplay  = () => { elPlay.textContent = "⏸"; elPlay.setAttribute("aria-pressed","true"); };
-elAudio.onpause = () => { elPlay.textContent = "▶";  elPlay.setAttribute("aria-pressed","false"); };
+  // ===== 音量靜音切換 =====
+  muteBtn.addEventListener("click", () => {
+    if (audio.volume > 0) {
+      lastVolume = audio.volume;
+      audio.volume = 0;
+      volumeSlider.value = 0;
+      muteBtn.textContent = "🔇";
+    } else {
+      audio.volume = lastVolume || 1;
+      volumeSlider.value = audio.volume;
+      muteBtn.textContent = "🔊";
+    }
+  });
 
-elVol.oninput = () => { elAudio.volume = parseFloat(elVol.value); };
+  volumeSlider.addEventListener("input", () => {
+    audio.volume = parseFloat(volumeSlider.value);
+    muteBtn.textContent = audio.volume > 0 ? "🔊" : "🔇";
+  });
 
-elAudio.onended = () => {
-  if (repeat) { elAudio.currentTime = 0; elAudio.play(); return; }
-  if (shuffle && tracks.length > 1) {
-    let ni = Math.floor(Math.random() * tracks.length);
-    if (ni === qIndex) ni = (ni + 1) % tracks.length;
-    loadTrack(ni);
-  } else {
-    loadTrack(qIndex + 1);
+  // ===== 播放邏輯 =====
+  function rebuildQueue() {
+    STATE.queue = STATE.tracks.map((_, i) => i);
+    if (STATE.shuffle) {
+      for (let i = STATE.queue.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [STATE.queue[i], STATE.queue[j]] = [STATE.queue[j], STATE.queue[i]];
+      }
+    }
+    STATE.qIndex = 0;
   }
-};
 
-// 空白鍵 = 播放/暫停（避免輸入框衝突）
-window.addEventListener("keydown", async (e)=>{
-  const tag = (e.target && (e.target.tagName||"")).toLowerCase();
-  const editable = e.target && (e.target.isContentEditable || tag === "input" || tag === "textarea" || tag === "select");
-  if (editable) return;
-
-  if (e.code === "Space") {
-    e.preventDefault();
-    await window.__viz?.resumeOnGesture();
-    togglePlay();
-  } else if (e.key === "a" || e.key === "A") {
-    await window.__viz?.resumeOnGesture(); loadTrack(qIndex-1);
-  } else if (e.key === "d" || e.key === "D") {
-    await window.__viz?.resumeOnGesture(); loadTrack(qIndex+1);
-  } else if (e.key === "ArrowLeft") {
-    elAudio.currentTime = Math.max(0, elAudio.currentTime - (e.ctrlKey ? 15 : 5));
-  } else if (e.key === "ArrowRight") {
-    elAudio.currentTime = Math.min(elAudio.duration || 1e9, elAudio.currentTime + (e.ctrlKey ? 15 : 5));
+  function currentTrack() {
+    const gi = STATE.queue[STATE.qIndex];
+    return STATE.tracks[gi];
   }
+
+  function playCurrent() {
+    const t = currentTrack();
+    if (!t) return;
+    audio.src = t.file;
+    audio.play();
+  }
+
+  function next() {
+    if (STATE.repeatMode === "one") {
+      // 單曲重播
+      audio.currentTime = 0;
+      playCurrent();
+      return;
+    }
+    STATE.qIndex++;
+    if (STATE.qIndex >= STATE.queue.length) {
+      if (STATE.repeatMode === "all") {
+        STATE.qIndex = 0;
+      } else {
+        console.log("播放結束");
+        return;
+      }
+    }
+    playCurrent();
+  }
+
+  function prev() {
+    STATE.qIndex = (STATE.qIndex - 1 + STATE.queue.length) % STATE.queue.length;
+    playCurrent();
+  }
+
+  // 綁定事件
+  document.getElementById("play").addEventListener("click", playCurrent);
+  document.getElementById("next").addEventListener("click", next);
+  document.getElementById("prev").addEventListener("click", prev);
+
+  audio.addEventListener("ended", next);
+
+  // ===== 初始化（假資料） =====
+  STATE.tracks = [
+    { file: "music/th10/song1.mp3", title: "Song 1" },
+    { file: "music/th10/song2.mp3", title: "Song 2" },
+    { file: "music/th10/song3.mp3", title: "Song 3" },
+  ];
+  rebuildQueue();
 });
-
-// 啟動
-loadTracks();

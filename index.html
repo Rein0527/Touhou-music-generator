@@ -3,12 +3,11 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Touhou Player</title>
+  <title>Touhou Player Rev I</title>
   <link rel="stylesheet" href="assets/css/style.css" />
 </head>
 <body>
   <div class="app" id="app">
-    <!-- 背景 -->
     <div class="bg" id="bg"></div>
     <div class="bg-next" id="bgNext"></div>
     <div class="bg-dim"></div>
@@ -53,23 +52,20 @@
 
     <!-- 底部控制列 -->
     <div class="bar">
-      <!-- 左側 -->
       <div class="bar-left">
-        <button class="btn icon" id="playlistBtn" title="播放清單">☰</button>
+        <button class="btn icon" id="playlistBtn">☰</button>
       </div>
 
-      <!-- 中間 -->
       <div class="bar-center">
-        <button class="btn icon" id="prev" title="上一首">⏮</button>
-        <button class="btn icon" id="play" title="播放/暫停">▶</button>
-        <button class="btn icon" id="next" title="下一首">⏭</button>
+        <button class="btn icon" id="prev">⏮</button>
+        <button class="btn icon" id="play">▶</button>
+        <button class="btn icon" id="next">⏭</button>
       </div>
 
-      <!-- 右側 -->
       <div class="bar-right">
-        <button class="btn icon" id="settingsBtn" title="設定">⚙</button>
+        <button class="btn icon" id="settingsBtn">⚙</button>
         <div class="vol">
-          <button id="muteBtn" class="btn icon" title="靜音">🔊</button>
+          <button id="muteBtn" class="btn icon">🔊</button>
           <input id="volume" type="range" min="0" max="1" step="0.01" value="1" />
         </div>
       </div>
@@ -78,5 +74,7 @@
 
   <audio id="audio"></audio>
   <script src="assets/js/player.js"></script>
+  <script src="assets/js/ui.js"></script>
+  <script src="assets/js/viz.js"></script>
 </body>
 </html>

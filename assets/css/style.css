@@ -146,3 +146,34 @@ canvas{ cursor:default; }
   height: 26px;
   display: block;
 }
+
+/* === Mobile：下載鈕右上、隱藏音量 === */
+@media (max-width: 768px) {
+  /* 隱藏音量（用手機側鍵就好） */
+  .vol { display: none !important; }
+
+  /* 下載按鈕固定在右上角，不受底部列擠壓 */
+  #dlBgBtn {
+    position: fixed !important;
+    top: calc(12px + env(safe-area-inset-top));
+    right: calc(12px + env(safe-area-inset-right));
+    z-index: 60;                /* 高於清單/設定浮層 */
+    width: 44px;
+    height: 44px;
+    padding: 0;
+    border-radius: 50%;
+    backdrop-filter: blur(10px);
+    background: rgba(255,255,255,.14);
+    box-shadow: 0 4px 18px rgba(0,0,0,.25);
+  }
+  /* 讓 SVG 在圓鈕中置中、好點擊 */
+  #dlBgBtn .icon-download {
+    width: 24px;
+    height: 24px;
+    margin: 0 auto;
+    display: block;
+  }
+
+  /* 上方多一點空間，避免與固定的下載鈕太靠近 */
+  .stage { padding-top: 8vh; }
+}

@@ -147,30 +147,51 @@ canvas{ cursor:default; }
   display: block;
 }
 
-/* === Mobile：下載鈕改到左上角，避免和設定鈕重疊 === */
+/* === Mobile：底部全擺 + 按鈕縮小 === */
 @media (max-width: 768px) {
-  /* 隱藏音量（手機用側鍵控制） */
-  .vol { display: none !important; }
+  /* 底部列更緊湊 */
+  .bar{
+    grid-template-columns: auto 1fr auto;
+    padding: 6px 10px;
+    gap: 6px;
+    padding-bottom: calc(6px + env(safe-area-inset-bottom));
+  }
+  .bar-center{ gap: 12px; }
+  .bar-right{ gap: 8px; }
 
-  /* 下載按鈕固定在左上角 */
-  #dlBgBtn {
-    position: fixed !important;
-    top: calc(12px + env(safe-area-inset-top));
-    left: calc(12px + env(safe-area-inset-left));
-    z-index: 60;
+  /* 統一縮小為 44x44 的圓形按鈕 */
+  .btn.icon{
     width: 44px;
     height: 44px;
-    padding: 0;
     border-radius: 50%;
-    backdrop-filter: blur(10px);
-    background: rgba(255,255,255,.14);
-    box-shadow: 0 4px 18px rgba(0,0,0,.25);
+    font-size: 20px;  /* 文字/emoji 按鈕的字級 */
+    padding: 0;
   }
 
-  #dlBgBtn .icon-download {
-    width: 24px;
-    height: 24px;
-    margin: 0 auto;
-    display: block;
+  /* 下載鈕回到底部列，覆蓋任何之前的固定定位 */
+  #dlBgBtn{
+    position: static !important;
+    top: auto !important; right: auto !important; left: auto !important; bottom: auto !important;
+    width: 44px; height: 44px;
+    border-radius: 50%;
+    backdrop-filter: none;
+    background: transparent;  /* 跟其他按鈕一致 */
+    box-shadow: none;
   }
+  #dlBgBtn .icon-download{
+    width: 22px;
+    height: 22px;
+    display: block;
+    margin: 0 auto;
+  }
+
+  /* 手機用側鍵控音量 → 隱藏整組音量 UI */
+  .vol{ display: none !important; }
+
+  /* 減少中間控制鈕間距，讓三顆能穩穩擺下 */
+  .bar-center .btn.icon{ width:44px; height:44px; font-size:20px; }
+
+  /* 進度/標題區留一點空間即可 */
+  .stage{ padding-top: 5vh; }
 }
+

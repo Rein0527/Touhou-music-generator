@@ -136,13 +136,16 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          rm -rf dist
           mkdir -p dist
-          shopt -s dotglob extglob
-          for f in * .*; do
-            [[ "$f" == "." || "$f" == ".." || "$f" == "dist" ]] && continue
-            cp -r "$f" dist/ || true
-          done
-          echo "Dist listing:"; ls -la dist; ls -la dist/data || true
+          # 用 tar 方式把所有檔案複製到 dist，排除 .git 和 dist 自己
+          tar -cf - \
+            --exclude='./.git' \
+            --exclude='./dist' \
+            . | (cd dist && tar -xf -)
+          echo "Dist listing:"; ls -la dist
+          echo "Dist/data:"; ls -la dist/data || true
+          echo "Dist/music:"; ls -la dist/music || true
 
       - name: Configure Pages
         uses: actions/configure-pages@v5

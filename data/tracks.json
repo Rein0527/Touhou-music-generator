@@ -1,0 +1,23 @@
+[
+  {
+    "file": "music/th09/rein - test.mp3",
+    "title": "test",
+    "artist": "rein",
+    "tags": [
+      "touhou",
+      "th09",
+      "rein",
+      "test"
+    ]
+  },
+  {
+    "file": "music/th10/ZUN - 信仰は儚き人間の為に.mp3",
+    "title": "信仰は儚き人間の為に",
+    "artist": "ZUN",
+    "tags": [
+      "touhou",
+      "th10",
+      "zun"
+    ]
+  }
+]

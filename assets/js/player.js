@@ -14,7 +14,7 @@ export const STATE = {
   bgFit: "contain",     // 預設 contain
   bgIntervalSec: 10,    // 預設 10 秒自動換圖（0=停用）
 
-  // 目前已載入的背景圖（供下載 / Media Session 封面）
+  // 目前已載入的背景圖（供下載 / 當作封面候選）
   bgSrc: "",
 };
 
@@ -82,10 +82,10 @@ export async function playCurrent() {
     await audio.play();
     updateNowPlayingUI(true);
     if (STATE.bgEnabled) updateDanbooruBackground(t, /*force*/ false);
-
-    // Media Session：更新系統卡片
-    updateMediaMetadata();
-    updatePlaybackState();
+    // Media Session：播放中與中繼資料
+    updateMediaMetadata(t);
+    updatePositionState();
+    setPlaybackState('playing');
   } catch (e) {
     console.warn("audio play error:", e);
   }
@@ -93,6 +93,7 @@ export async function playCurrent() {
 export function pause() {
   audio.pause();
   updateNowPlayingUI(false);
+  setPlaybackState('paused');
 }
 export function togglePlay() {
   if (audio.paused) playCurrent(); else pause();
@@ -106,7 +107,7 @@ export function next() {
   STATE.qIndex++;
   if (STATE.qIndex >= STATE.queue.length) {
     if (STATE.repeatMode === "all") STATE.qIndex = 0;
-    else return;
+    else { setPlaybackState('none'); return; }
   }
   playCurrent();
 }
@@ -163,8 +164,12 @@ export async function initPlayer() {
   setupBgAutoRotate();
   if (STATE.bgEnabled) updateDanbooruBackground();
 
-  // Media Session：註冊一次 action handlers
-  registerMediaActionsOnce();
+  // ✅ 初始化 Media Session（背景播放控制）
+  setupMediaSession();
+
+  // 讓鎖屏/控制中心的進度條保持同步
+  audio.addEventListener('timeupdate', updatePositionState);
+  audio.addEventListener('durationchange', updatePositionState);
 }
 
 /* ===================== 背景（Danbooru） ===================== */
@@ -215,7 +220,7 @@ export async function updateDanbooruBackground(track, force = false) {
     if (!src) src = await fetchDanbooruUrl(buildTags());
 
     if (src) {
-      STATE.bgSrc = src; // ✅ 記住目前背景圖（供下載 / Media Session 封面）
+      STATE.bgSrc = src; // ✅ 記住目前背景圖（供下載與 Media Session 封面）
       bgNext.style.backgroundImage = `url("${src}")`;
       bgNext.style.opacity = "1";
       bg.style.opacity = "0";
@@ -224,9 +229,8 @@ export async function updateDanbooruBackground(track, force = false) {
         bg.style.opacity = "1";
         bgNext.style.opacity = "0";
         bgSwapping = false;
-
-        // Media Session：封面同步
-        updateMediaMetadata();
+        // 背景圖變更後，同步更新 Media Session 封面
+        updateMediaMetadata(currentTrack());
       }, 850);
     } else {
       bgSwapping = false;
@@ -326,69 +330,90 @@ export async function downloadCurrentBg() {
   }
 }
 
-/* ===================== Media Session（系統層控制） ===================== */
+/* ===================== Media Session（背景播放控制） ===================== */
 
-function mediaSessionSupported(){
-  return 'mediaSession' in navigator;
-}
+function setupMediaSession() {
+  if (!('mediaSession' in navigator)) return;
 
-function updateMediaMetadata(){
-  if (!mediaSessionSupported()) return;
-  try{
-    const t = currentTrack() || {};
-    const title  = t.title || (t.file ? t.file.split('/').pop() : '—');
-    const artist = t.artist || 'Touhou Player';
-    const artSrc = STATE.bgSrc || '';
-    const artwork = artSrc ? [
-      { src: artSrc, sizes: '256x256', type: 'image/jpeg' },
-      { src: artSrc, sizes: '512x512', type: 'image/jpeg' },
-    ] : [];
-    navigator.mediaSession.metadata = new MediaMetadata({ title, artist, album: '', artwork });
-  }catch{}
-}
+  // 先放一份空的 metadata，避免某些瀏覽器需要初值才顯示控制
+  updateMediaMetadata(currentTrack());
 
-function updatePlaybackState(){
-  if (!mediaSessionSupported()) return;
-  try{
-    navigator.mediaSession.playbackState = audio.paused ? 'paused' : 'playing';
-    const duration = isFinite(audio.duration) ? audio.duration : 0;
-    const position = isFinite(audio.currentTime) ? audio.currentTime : 0;
-    const rate = audio.playbackRate || 1;
-    if (navigator.mediaSession.setPositionState) {
-      navigator.mediaSession.setPositionState({ duration, position, playbackRate: rate });
-    }
-  }catch{}
-}
+  // 基本控制
+  navigator.mediaSession.setActionHandler('play', async () => {
+    try { await playCurrent(); } catch {}
+  });
+  navigator.mediaSession.setActionHandler('pause', () => { pause(); });
 
-function registerMediaActionsOnce(){
-  if (!mediaSessionSupported() || registerMediaActionsOnce._done) return;
-  registerMediaActionsOnce._done = true;
+  navigator.mediaSession.setActionHandler('previoustrack', () => { prev(); });
+  navigator.mediaSession.setActionHandler('nexttrack', () => { next(); });
 
-  try{
-    navigator.mediaSession.setActionHandler('play',  async ()=>{ try{ await audio.play(); }catch{} });
-    navigator.mediaSession.setActionHandler('pause',       ()=>{ audio.pause(); });
-    navigator.mediaSession.setActionHandler('previoustrack',()=>{ prev(); });
-    navigator.mediaSession.setActionHandler('nexttrack',    ()=>{ next(); });
+  // 快進 / 倒轉（預設 10 秒）
+  navigator.mediaSession.setActionHandler('seekforward', (e) => {
+    const step = e.seekOffset || 10;
+    audio.currentTime = Math.min((audio.duration||Infinity), (audio.currentTime||0) + step);
+    updatePositionState();
+  });
+  navigator.mediaSession.setActionHandler('seekbackward', (e) => {
+    const step = e.seekOffset || 10;
+    audio.currentTime = Math.max(0, (audio.currentTime||0) - step);
+    updatePositionState();
+  });
 
-    navigator.mediaSession.setActionHandler('seekto', (d)=>{
-      if (d?.seekTime != null) {
-        audio.currentTime = Math.max(0, Math.min(audio.duration||0, d.seekTime));
+  // 指定時間拖移
+  navigator.mediaSession.setActionHandler('seekto', (e) => {
+    if (typeof e.seekTime === 'number' && isFinite(e.seekTime)) {
+      if (e.fastSeek && 'fastSeek' in audio) {
+        audio.fastSeek(e.seekTime);
+      } else {
+        audio.currentTime = e.seekTime;
       }
-      updatePlaybackState();
-    });
-    navigator.mediaSession.setActionHandler('seekbackward', (d)=>{
-      const s = d?.seekOffset || 5; audio.currentTime = Math.max(0, audio.currentTime - s); updatePlaybackState();
-    });
-    navigator.mediaSession.setActionHandler('seekforward',  (d)=>{
-      const s = d?.seekOffset || 5; audio.currentTime = Math.min(audio.duration||0, audio.currentTime + s); updatePlaybackState();
-    });
-  }catch{}
+      updatePositionState();
+    }
+  });
+
+  // 可選：停止
+  navigator.mediaSession.setActionHandler('stop', () => {
+    pause();
+    audio.currentTime = 0;
+    setPlaybackState('none');
+    updatePositionState();
+  });
 }
 
-// 與播放器事件同步系統卡片狀態
-audio.addEventListener('play',           ()=>{ updatePlaybackState(); });
-audio.addEventListener('pause',          ()=>{ updatePlaybackState(); });
-audio.addEventListener('timeupdate',     ()=>{ updatePlaybackState(); });
-audio.addEventListener('durationchange', ()=>{ updatePlaybackState(); });
+function updateMediaMetadata(track) {
+  if (!('mediaSession' in navigator)) return;
+  const title  = track?.title  || '—';
+  const artist = track?.artist || '';
+  // 封面候選：曲目自帶 cover → 目前背景圖 → 留空
+  const artwork = [];
+  const coverCandidates = [track?.cover, STATE.bgSrc].filter(Boolean);
+  for (const src of coverCandidates) {
+    artwork.push({ src, sizes: '512x512', type: 'image/jpeg' });
+  }
+  try {
+    navigator.mediaSession.metadata = new MediaMetadata({
+      title, artist, album: 'Touhou Music', artwork
+    });
+  } catch (e) {
+    // 某些瀏覽器可能因圖片跨域或型別問題失敗，忽略即可
+  }
+}
+
+function updatePositionState() {
+  if (!('mediaSession' in navigator)) return;
+  if (typeof navigator.mediaSession.setPositionState !== 'function') return;
+  try {
+    navigator.mediaSession.setPositionState({
+      duration: Number.isFinite(audio.duration) ? audio.duration : 0,
+      position: Number.isFinite(audio.currentTime) ? audio.currentTime : 0,
+      playbackRate: audio.playbackRate || 1
+    });
+  } catch {}
+}
+
+function setPlaybackState(state/* 'none'|'paused'|'playing' */) {
+  if (!('mediaSession' in navigator)) return;
+  try { navigator.mediaSession.playbackState = state; } catch {}
+}
 
 export { audio, PAGE_BASE };

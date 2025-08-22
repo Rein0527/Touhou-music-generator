@@ -1,11 +1,15 @@
 :root{
-  /* 新增主題色，整站共用 */
+  /* 主題色 */
   --accent: #bb71f3;
 
-  /* 既有變數 */
+  /* 背景/視覺化控制變數 */
   --bg-dim: 1;            /* 顯示圖片時 → 0；關閉圖片時 → 1 */
   --bg-fit: contain;      /* 預設改成 contain */
   --bg-blur: 0px;         /* 顯示圖片時關閉模糊；關閉背景時改為 8px */
+
+  /* Cross-fade 參數 */
+  --bg-xfade-ms: 600ms;                        /* ← 你要的 600ms */
+  --bg-xfade-ease: cubic-bezier(.22,.61,.36,1);
 }
 
 /* 背景與舞台 */
@@ -21,16 +25,28 @@ html, body {
   background-repeat: no-repeat;
   filter: blur(var(--bg-blur)) saturate(1.05) brightness(0.74);
   transform:scale(1.03);
-  transition:opacity .8s ease, background-size .2s ease, filter .2s ease;
+  /* 以變數控制淡入淡出時長與曲線 */
+  transition:
+    opacity var(--bg-xfade-ms) var(--bg-xfade-ease),
+    background-size .2s ease,
+    filter .2s ease;
+  will-change: opacity, filter, background-image;
 }
 .bg{opacity:1}
 .bg-next{opacity:0}
+
+/* 可選：進場瞬間微調（想關就刪掉此段） */
+.bg-next.fade-entering {
+  filter: blur(0.2px) saturate(1.06) brightness(0.78);
+}
+
 .bg-dim{
   position:absolute; inset:0;
   background:radial-gradient(ellipse at center,rgba(0,0,0,.2),rgba(0,0,0,.62) 58%,rgba(0,0,0,.82));
   opacity: var(--bg-dim);
   transition: opacity .25s ease;
 }
+
 .stage{ position:relative; z-index:5; display:grid; place-items:center; min-height:72vh; padding-top:5vh; gap:16px; }
 canvas{ width:min(78vmin,1040px); height:min(78vmin,1040px); aspect-ratio:1/1; touch-action:none; }
 
@@ -144,65 +160,4 @@ canvas{ cursor:default; }
   width: 37px;
   height: 26px;
   display: block;
-}
-
-/* === Mobile tweaks (≤ 480px) === */
-@media (max-width: 480px){
-
-  /* 舞台與視覺化畫布更貼合螢幕 */
-  .stage{
-    min-height: 64vh;
-    padding-top: 2vh;
-    gap: 12px;
-  }
-  /* 讓畫布與進度區盡量吃滿寬 */
-  canvas{
-    width: 92vw;
-    height: 92vw;
-  }
-  .nowplaying{ width: 92vw; }
-  .title{ font-size: 14px; }
-
-  /* 進度列：縮小側邊時間、必要時隱藏右側總長避免擠爆 */
-  .scrub{ gap: 8px; }
-  .time{ font-size: 12px; opacity: .9; }
-  .t-right{ display: none; } /* 想保留可改回 display:initial; */
-
-  /* 底部控制列：縮按鈕、縮間距、隱藏音量滑桿，只留靜音鍵 */
-  .bar{
-    grid-template-columns: auto 1fr auto;
-    padding: 8px 10px calc(8px + env(safe-area-inset-bottom));
-    gap: 8px;
-  }
-  .bar-center{ gap: 12px; }
-  .bar-right{ gap: 8px; }
-  .btn.icon{
-    width: 44px;
-    height: 44px;
-    font-size: 20px;
-    border-radius: 12px; /* 手機上更好點 */
-  }
-  .vol input{ display: none; }       /* ← 只在手機隱藏音量滑桿 */
-  .icon-download{ width: 28px; height: 20px; }
-
-  /* 側邊抽屜與設定浮窗改為更適合手機的寬度 */
-  .playlist-panel{
-    width: 86vw;
-    left: -86vw;
-  }
-  .playlist-panel.open{ left: 0; }
-
-  .settings-flyout{
-    right: 8px;
-    bottom: calc(64px + env(safe-area-inset-bottom));
-    width: calc(100% - 16px);
-  }
-
-  /* 進度條高度微調，手指更好拖曳 */
-  .bar-outer{ height: 12px; }
-}
-
-/* iPhone 瀏海安全區域（含桌機與大螢幕也安全） */
-.bar{
-  padding-bottom: calc(10px + env(safe-area-inset-bottom));
 }

@@ -171,7 +171,7 @@ function ratingToken(v){
   return map[v] || "general";
 }
 
-// ✅ 只產生「<單一主 tag> + rating」，主 tag 由使用者輸入，預設 touhou
+// 只產生「<單一主 tag> + rating」，主 tag 由使用者輸入，預設 touhou
 function buildTags() {
   const baseRaw = (STATE.bgTag || "touhou").trim();
   // 把空白轉底線，確保只是一個 Danbooru tag（避免多個 tag 觸發 422）
@@ -181,7 +181,7 @@ function buildTags() {
   return `${base} ${rating}`.replace(/\brandom:\S+\b/gi, "").trim();
 }
 
-// ✅ 使用 random=true 當查詢參數（不要用 random:1 當成 tag）
+// 使用 random=true 當查詢參數（不要用 random:1 當成 tag）
 async function fetchDanbooruUrl(tags) {
   const qs = `https://danbooru.donmai.us/posts.json?limit=1&random=true&tags=${encodeURIComponent(tags)}`;
   const res = await fetch(qs, { cache: "no-store" });
@@ -208,7 +208,7 @@ export async function updateDanbooruBackground(track, force = false) {
     if (!src) src = await fetchDanbooruUrl(buildTags());
 
     if (src) {
-      STATE.bgSrc = src; // ✅ 記住目前背景圖（供下載）
+      STATE.bgSrc = src; // 記住目前背景圖（供下載）
       bgNext.style.backgroundImage = `url("${src}")`;
       bgNext.style.opacity = "1";
       bg.style.opacity = "0";
@@ -241,7 +241,7 @@ function applyBgGlass() {
 let bgTimer = null;
 function clearBgTimer(){ if(bgTimer){ clearInterval(bgTimer); bgTimer = null; } }
 
-// ✅ 只有在播放中才會跑自動換圖
+// 只有在播放中才會跑自動換圖
 function isPlaying() { return !audio.paused && !audio.ended; }
 
 function maybeKickRotate() {
@@ -285,7 +285,7 @@ export function getBgSettings(){
   };
 }
 
-// ✅ 下載目前背景圖
+// 下載目前背景圖
 export async function downloadCurrentBg() {
   try {
     const src = STATE.bgSrc;

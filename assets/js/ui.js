@@ -25,7 +25,7 @@ const elNext = document.getElementById("next");
 const muteBtn = document.getElementById("muteBtn");
 const volumeSlider = document.getElementById("volume");
 
-// ✅ 新增：下載目前背景圖按鈕
+// 下載目前背景圖按鈕
 const dlBgBtn = document.getElementById("dlBgBtn");
 
 // 設定項
@@ -107,7 +107,7 @@ function wireEvents() {
     updateMuteIcon();
   });
 
-  // ✅ 下載目前背景圖
+  // 下載目前背景圖
   dlBgBtn.addEventListener("click", () => { downloadCurrentBg(); });
 
   // 鍵盤

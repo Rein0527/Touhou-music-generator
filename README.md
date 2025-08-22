@@ -18,9 +18,9 @@
 │ │ └── viz.js # 視覺化 (等化器/進度環)
 │ └── img/ # 靜態圖標、預設封面
 ├── music/ # 音樂檔案 (支援子資料夾)
-│ ├── th06/
-│ ├── th07/
-│ └── ...
+│ ├── th01/
+│ ├── ...
+│ └── th18/
 ├── data/ # JSON 檔（GitHub Actions 自動生成）
 │ ├── tracks.json
 │ └── images.json

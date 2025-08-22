@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Touhou Player</title>
+  <title>Touhou Player — Glass</title>
   <link rel="stylesheet" href="assets/css/style.css">
 </head>
 <body>
@@ -12,38 +12,76 @@
     <div class="bg-next" id="bgNext"></div>
     <div class="bg-dim"></div>
 
-    <div class="stage"><canvas id="viz" width="1200" height="1200"></canvas></div>
+    <!-- 玻璃舞台 -->
+    <div class="stage">
+      <div class="glass-stage" aria-label="視覺化舞台">
+        <canvas id="viz" width="1200" height="1200"></canvas>
+      </div>
+    </div>
 
-    <!-- 播放列 -->
-    <div class="bar">
+    <!-- 播放列（移除🔀/🔁，改到設定面板） -->
+    <div class="bar" role="group" aria-label="播放器控制">
       <div class="bar-left">
-        <button class="btn icon" id="toggleList">☰</button>
+        <button class="btn icon" id="toggleList" aria-label="開啟播放清單">☰</button>
       </div>
       <div class="controls">
-        <button class="btn icon" id="prev">⏮</button>
-        <button class="btn icon" id="play">▶</button>
-        <button class="btn icon" id="next">⏭</button>
+        <button class="btn icon" id="prev" aria-label="上一首">⏮</button>
+        <button class="btn icon btn-play" id="play" aria-label="播放/暫停">▶</button>
+        <button class="btn icon" id="next" aria-label="下一首">⏭</button>
       </div>
       <div class="bar-right">
-        <button class="btn icon" id="toggleShuffle">🔀</button>
-        <button class="btn icon" id="toggleRepeat">🔁</button>
-        <button class="btn icon" id="toggleSettings">⚙</button>
-        <input type="range" id="volume" min="0" max="1" step="0.01" value="1"/>
+        <button class="btn icon" id="toggleSettings" aria-label="開啟設定">⚙</button>
+        <input type="range" id="volume" min="0" max="1" step="0.01" value="1" aria-label="音量" />
       </div>
     </div>
 
     <!-- 清單面板 -->
-    <div class="playlist" id="playlist">
-      <div class="close" id="closeList">✖</div>
-      <h3>播放清單</h3>
-      <ul id="trackList"></ul>
+    <div class="playlist" id="playlist" aria-modal="true" role="dialog">
+      <div class="sheet">
+        <div class="sheet-head">
+          <h3>播放清單</h3>
+          <button class="btn icon ghost" id="closeList" aria-label="關閉清單">✖</button>
+        </div>
+        <ul id="trackList"></ul>
+      </div>
     </div>
 
-    <!-- 設定面板 -->
-    <div class="settings" id="settings">
-      <label>背景 Tag：<input type="text" id="bgTag" placeholder="例如：reimu"/></label>
-      <label>輪播秒數：<input type="number" id="bgInterval" value="15" min="5"/></label>
-      <button class="btn" id="closeSettings">關閉</button>
+    <!-- 設定面板（含隨機/循環開關） -->
+    <div class="settings" id="settings" aria-modal="true" role="dialog">
+      <div class="sheet">
+        <div class="sheet-head">
+          <h3>設定</h3>
+          <button class="btn icon ghost" id="closeSettings" aria-label="關閉設定">✖</button>
+        </div>
+
+        <div class="form-row">
+          <label class="toggle">
+            <input type="checkbox" id="toggleShuffleSwitch" />
+            <span class="track"><span class="knob"></span></span>
+            <span class="label">隨機播放</span>
+          </label>
+        </div>
+
+        <div class="form-row">
+          <label class="toggle">
+            <input type="checkbox" id="toggleRepeatSwitch" />
+            <span class="track"><span class="knob"></span></span>
+            <span class="label">重複播放</span>
+          </label>
+        </div>
+
+        <div class="form-row">
+          <label>背景 Tag
+            <input class="input" type="text" id="bgTag" placeholder="例如：reimu" />
+          </label>
+        </div>
+
+        <div class="form-row">
+          <label>輪播秒數
+            <input class="input" type="number" id="bgInterval" value="15" min="5" />
+          </label>
+        </div>
+      </div>
     </div>
   </div>
 

@@ -1,0 +1,122 @@
+name: Build & Deploy Touhou Player
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: "pages"
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Generate data/tracks.json & images.json
+        run: |
+          mkdir -p data
+          node --input-type=module - <<'NODE'
+          import fs from 'node:fs';
+          import path from 'node:path';
+
+          const musicDir = path.join(process.cwd(),'music');
+          const dataDir  = path.join(process.cwd(),'data');
+
+          // ---- 1) 產生 tracks.json（同步）----
+          if (!fs.existsSync(musicDir)) {
+            console.log('⚠️  沒有 /music 目錄，建立空 tracks.json');
+            fs.writeFileSync(path.join(dataDir,'tracks.json'),'[]');
+          } else {
+            const files = fs.readdirSync(musicDir).filter(f => /\.(mp3|ogg|wav|m4a|flac)$/i.test(f));
+            const tracks = files.map(file => {
+              const base = file.replace(/\.[^.]+$/,'');
+              let artist='Unknown', title=base;
+              const m = base.split(' - ');
+              if (m.length>=2){ artist=m[0]; title=m.slice(1).join(' - '); }
+              return { file: `music/${file}`, title, artist, tags: ['touhou'] };
+            });
+            fs.writeFileSync(path.join(dataDir,'tracks.json'), JSON.stringify(tracks, null, 2));
+            console.log('✅ tracks.json 產生完成，曲目數：', tracks.length);
+          }
+
+          // ---- 2) 依 tags 產生 images.json（確實 await 完成）----
+          let tags = new Set(['touhou']);
+          try {
+            const tracks = JSON.parse(fs.readFileSync(path.join(dataDir,'tracks.json'),'utf8'));
+            tracks.forEach(t => (t.tags?.length ? t.tags : ['touhou']).forEach(tag => tags.add(tag)));
+          } catch {}
+
+          const images = {};
+          for (const tag of tags) {
+            try {
+              const url = `https://danbooru.donmai.us/posts.json?limit=30&tags=${encodeURIComponent(tag + ' rating:safe order:rank')}`;
+              const res = await fetch(url, { headers: { 'User-Agent': 'GitHubActions/1.0 (+pages)' }});
+              if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
+              const arr = await res.json();
+              const seen = new Set();
+              const list = [];
+              for (const p of arr) {
+                const u = p.large_file_url || p.file_url;
+                if (!u || p.rating !== 's') continue;
+                const abs = u.startsWith('http') ? u : `https://danbooru.donmai.us${u}`;
+                if (seen.has(abs)) continue;
+                seen.add(abs);
+                list.push({ url: abs, source: `post:${p.id}` });
+              }
+              images[tag] = list;
+              console.log(`🖼️  ${tag}: ${list.length} 張`);
+              await new Promise(r => setTimeout(r, 300));
+            } catch (err) {
+              console.log('⚠️  產生圖片失敗：', tag, err.message);
+              images[tag] = images[tag] || [];
+            }
+          }
+          fs.writeFileSync(path.join(dataDir,'images.json'), JSON.stringify(images, null, 2));
+          console.log('✅ images.json 產生完成');
+          NODE
+
+      - name: Sanity check artifacts
+        run: |
+          echo "--- data dir ---" && ls -la data || true
+          echo "--- tracks head ---" && (head -n 5 data/tracks.json || true)
+          echo "--- images head ---" && (head -n 5 data/images.json || true)
+
+      - name: Prepare artifact
+        run: |
+          mkdir -p dist
+          shopt -s extglob
+          cp -r !(dist|.git|.github) dist/ || true
+          cp -r .github dist/.github || true
+
+      - name: Configure Pages
+        uses: actions/configure-pages@v5
+
+      - name: Upload artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: dist
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4

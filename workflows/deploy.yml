@@ -29,14 +29,14 @@ jobs:
       - name: Generate data/tracks.json & images.json
         run: |
           mkdir -p data
-          node - <<'NODE'
-          const fs = require('fs');
-          const path = require('path');
+          node --input-type=module - <<'NODE'
+          import fs from 'node:fs';
+          import path from 'node:path';
 
           const musicDir = path.join(process.cwd(),'music');
           const dataDir  = path.join(process.cwd(),'data');
 
-          // ---- 1) 產生 tracks.json ----
+          // ---- 1) 產生 tracks.json（同步）----
           if (!fs.existsSync(musicDir)) {
             console.log('⚠️  沒有 /music 目錄，建立空 tracks.json');
             fs.writeFileSync(path.join(dataDir,'tracks.json'),'[]');
@@ -53,47 +53,47 @@ jobs:
             console.log('✅ tracks.json 產生完成，曲目數：', tracks.length);
           }
 
-          // ---- 2) 依 tags 產生 images.json（Danbooru rating:safe） ----
-          let tags = new Set();
+          // ---- 2) 依 tags 產生 images.json（確實 await 完成）----
+          let tags = new Set(['touhou']);
           try {
             const tracks = JSON.parse(fs.readFileSync(path.join(dataDir,'tracks.json'),'utf8'));
-            tracks.forEach(t => (t.tags||['touhou']).forEach(tag => tags.add(tag)));
-          } catch (e) { tags.add('touhou'); }
+            tracks.forEach(t => (t.tags?.length ? t.tags : ['touhou']).forEach(tag => tags.add(tag)));
+          } catch {}
 
-          (async () => {
-            const tagList = [...tags];
-            const images = {};
-            for (const tag of tagList) {
-              try {
-                const url = `https://danbooru.donmai.us/posts.json?limit=30&tags=${encodeURIComponent(tag + ' rating:safe order:rank')}`;
-                const res = await fetch(url);
-                if (!res.ok) throw new Error(res.status + ' ' + res.statusText);
-                const arr = await res.json();
-                const list = [];
-                const seen = new Set();
-                for (const p of arr) {
-                  const u = p.large_file_url || p.file_url;
-                  if (!u) continue;
-                  const abs = u.startsWith('http') ? u : `https://danbooru.donmai.us${u}`;
-                  if (seen.has(abs)) continue;
-                  seen.add(abs);
-                  // 只接受 rating 安全（保險再判一次）
-                  if (p.rating && p.rating !== 's') continue;
-                  list.push({ url: abs, source: `post:${p.id}` });
-                }
-                images[tag] = list;
-                console.log(`🖼️  ${tag}: ${list.length} 張`);
-              } catch (err) {
-                console.log('⚠️  產生圖片失敗：', tag, err.message);
-                images[tag] = images[tag] || [];
+          const images = {};
+          for (const tag of tags) {
+            try {
+              const url = `https://danbooru.donmai.us/posts.json?limit=30&tags=${encodeURIComponent(tag + ' rating:safe order:rank')}`;
+              const res = await fetch(url, { headers: { 'User-Agent': 'GitHubActions/1.0 (+pages)' }});
+              if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
+              const arr = await res.json();
+              const seen = new Set();
+              const list = [];
+              for (const p of arr) {
+                const u = p.large_file_url || p.file_url;
+                if (!u || p.rating !== 's') continue;
+                const abs = u.startsWith('http') ? u : `https://danbooru.donmai.us${u}`;
+                if (seen.has(abs)) continue;
+                seen.add(abs);
+                list.push({ url: abs, source: `post:${p.id}` });
               }
+              images[tag] = list;
+              console.log(`🖼️  ${tag}: ${list.length} 張`);
+              await new Promise(r => setTimeout(r, 300));
+            } catch (err) {
+              console.log('⚠️  產生圖片失敗：', tag, err.message);
+              images[tag] = images[tag] || [];
             }
-            fs.writeFileSync(path.join(dataDir,'images.json'), JSON.stringify(images, null, 2));
-            console.log('✅ images.json 產生完成');
-          })()
-          .catch(e => { console.error('images.json 產生錯誤', e); })
-          .finally(() => {});
+          }
+          fs.writeFileSync(path.join(dataDir,'images.json'), JSON.stringify(images, null, 2));
+          console.log('✅ images.json 產生完成');
           NODE
+
+      - name: Sanity check artifacts
+        run: |
+          echo "--- data dir ---" && ls -la data || true
+          echo "--- tracks head ---" && (head -n 5 data/tracks.json || true)
+          echo "--- images head ---" && (head -n 5 data/images.json || true)
 
       - name: Prepare artifact
         run: |

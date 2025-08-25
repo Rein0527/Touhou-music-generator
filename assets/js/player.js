@@ -4,12 +4,12 @@ export const STATE = {
   queue: [],
   qIndex: 0,
   repeatMode: "off",   // "off" | "one" | "all"
-  shuffle: false,
+  shuffle: true,       // 預設開啟隨機播放
   lastVolume: 1,
 
   // 背景圖設定（供設定面板讀寫）
   bgEnabled: true,
-  bgTag: "touhou",      // 預設主標籤（使用者可改）
+  bgTag: "touhou",      // 全域預設主標籤（可被單曲覆寫）
   bgRating: "safe",     // safe | sensitive | questionable（safe 會映射到 rating:general）
   bgFit: "contain",     // 預設 contain
   bgIntervalSec: 10,    // 預設 10 秒自動換圖（0=停用）
@@ -102,13 +102,19 @@ export function rebuildQueue() {
 export async function playCurrent() {
   const t = currentTrack();
   if (!t) return;
-  audio.src = t.file;
+
+  // 只有在曲目真的改變時才指定 src，避免續播時從 0 秒開始
+  const cur = audio.src || "";
+  const want = new URL(t.file, window.location.href).href;
+  const changed = (cur !== want);
+  if (changed) audio.src = t.file;
+
   try {
     await audio.play();
     updateNowPlayingUI(true);
 
-    // 換歌：清掉上一首的預載 → 立即以「該曲目」的 tag 抓圖並切換
-    if (STATE.bgEnabled) {
+    // 只有換歌時才重置背景預載並以該曲的 tag 強制刷新
+    if (STATE.bgEnabled && changed) {
       nextReady = null; preloading = null;
       await updateDanbooruBackground(t, /*force*/ true);
     }
@@ -121,7 +127,10 @@ export function pause() {
   updateNowPlayingUI(false);
 }
 export function togglePlay() {
-  if (audio.paused) playCurrent(); else pause();
+  // 還沒指定來源 → 正常開播；已指定且暫停 → 續播；正在播 → 暫停
+  if (!audio.src) { playCurrent(); return; }
+  if (audio.paused) { audio.play(); updateNowPlayingUI(true); }
+  else { pause(); }
 }
 export function next() {
   if (STATE.repeatMode === "one") {
@@ -189,8 +198,8 @@ export async function initPlayer() {
   setupBgAutoRotate();
 
   if (STATE.bgEnabled) {
-    // 一開始就預載第一張，載好後立刻顯示（不等計時，避免空白）
-    await preloadNext(true, /*track*/ null);
+    // 以當前曲目（通常是隊列第 0 首）的 tag 預載並顯示第一張，避免空白
+    await preloadNext(true, currentTrack() ?? null);
     await swapToNext(/*immediate*/true);
   }
 }
@@ -342,12 +351,12 @@ function maybeKickRotate() {
   clearBgTimer();
   const sec = Number(STATE.bgIntervalSec) || 0;
   if (STATE.bgEnabled && sec > 0 && !document.hidden && isPlaying()) {
-    ensurePreload(); // 確保下一張在下載（會用 currentTrack 的條件）
+    ensurePreload(currentTrack() ?? null); // 以目前曲目的 tag 預載
     // 以固定間隔觸發「嘗試切換」。如果圖片尚未載好，會延後到載好後的下一個 tick。
     bgTimer = setInterval(async () => {
       if (!nextReady) {
         // 還沒載好 → 補啟預載，這次先略過，等下個 tick
-        ensurePreload();
+        ensurePreload(currentTrack() ?? null);
         return;
       }
       await swapToNext(/*immediate*/false);
@@ -361,13 +370,13 @@ function setupBgAutoRotate() {
   // 分頁前後景切換：回到前景「不強制切」，只重啟排程與預載
   document.addEventListener('visibilitychange', () => {
     if (!document.hidden && STATE.bgEnabled && isPlaying()) {
-      ensurePreload();
+      ensurePreload(currentTrack() ?? null);
     }
     maybeKickRotate();
   });
 
   // 播放狀態變化 → 控制輪播
-  audio.addEventListener('play',  () => { ensurePreload(); maybeKickRotate(); });
+  audio.addEventListener('play',  () => { ensurePreload(currentTrack() ?? null); maybeKickRotate(); });
   audio.addEventListener('pause', () => { maybeKickRotate(); });
   audio.addEventListener('ended', () => { maybeKickRotate(); });
 }

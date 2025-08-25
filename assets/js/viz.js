@@ -1,208 +1,168 @@
-// 視覺化（圓形七彩頻譜 + 進度弧 + 閃電特效，無峰值小帽）
-const audio  = document.getElementById("audio");
+// 視覺化（彩虹等化條 + 低頻加權 + 響應式光暈 + 圓弧進度）
+// 只改畫面，不改實際音訊輸出
+const audio = document.getElementById("audio");
 const canvas = document.getElementById("viz");
-const ctx    = canvas.getContext("2d");
+const ctx = canvas.getContext("2d");
 
-let audioCtx, analyser, sourceNode, rafId;
+// —— 可調參數 ——
+// bins: 條數；bassBoost: 低頻加權強度；glowScale: 光暈強度；smoothing: 頻譜平滑
+const CFG = {
+  bins: 96,
+  bassBoost: 1.6,          // 1.0 = 不加權；越大越打鼓
+  glowScale: 90,           // 環狀光暈強度（依音量倍增）
+  smoothing: 0.8,          // 0~1：越大越平滑
+  barBase: 24,             // 條的基礎長度
+  barGain: 170,            // 條的增益
+  ringRadiusRatio: 0.34,   // 內圈半徑佔畫布邊長
+  ringOffset: 52,          // 進度弧與等化條之間的距離
+};
 
-// ---------------- HiDPI & Resize ----------------
-let DPR = Math.max(1, Math.min(3, window.devicePixelRatio || 1));
-function resizeCanvas() {
-  DPR = Math.max(1, Math.min(3, window.devicePixelRatio || 1));
-  const cssW = canvas.clientWidth  || canvas.width;
-  const cssH = canvas.clientHeight || canvas.height;
-  canvas.width  = Math.round(cssW * DPR);
-  canvas.height = Math.round(cssH * DPR);
-  ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
-}
-window.addEventListener("resize", resizeCanvas, { passive: true });
-resizeCanvas();
+let audioCtx, analyser, sourceNode, rafId, data;
 
-// ---------------- Audio Graph -------------------
 function ensureAudioGraph() {
   if (!audioCtx) {
     audioCtx = new (window.AudioContext || window.webkitAudioContext)();
     analyser = audioCtx.createAnalyser();
     analyser.fftSize = 2048;
-    analyser.smoothingTimeConstant = 0.8;
+    analyser.smoothingTimeConstant = CFG.smoothing;
+
     sourceNode = audioCtx.createMediaElementSource(audio);
+    // 只接到 analyser，再接目的地（不插濾波器，保持原音）
     sourceNode.connect(analyser);
     analyser.connect(audioCtx.destination);
+
+    data = new Uint8Array(analyser.frequencyBinCount);
+
+    // 針對高 DPI，確保畫面銳利
+    const dpr = Math.max(1, Math.min(2, window.devicePixelRatio || 1));
+    const logical = Math.min(78, Math.min(window.innerWidth, window.innerHeight) * 0.78);
+    // 只要別動 index.html 的寬高屬性即可，這裡動實際像素
+    canvas.width  = Math.floor(canvas.width  * dpr);
+    canvas.height = Math.floor(canvas.height * dpr);
+    ctx.scale(dpr, dpr);
   }
 }
-async function ensureResumed() {
-  try {
-    ensureAudioGraph();
-    if (audioCtx.state === "suspended") await audioCtx.resume();
-  } catch {}
+
+// 計算平均音量與低頻能量（0~1）
+function computeLevels(arr) {
+  let sum = 0;
+  for (let i = 0; i < arr.length; i++) sum += arr[i];
+  const avg = (sum / (arr.length * 255)) || 0;
+
+  // 低頻：取前 1/6 區段做均值
+  const lowEnd = Math.max(8, Math.floor(arr.length / 6));
+  let bsum = 0;
+  for (let i = 0; i < lowEnd; i++) bsum += arr[i];
+  const bass = (bsum / (lowEnd * 255)) || 0;
+
+  return { avg, bass };
 }
-
-// ---------------- Helpers ----------------------
-function getAccent() {
-  return getComputedStyle(document.documentElement)
-    .getPropertyValue("--accent").trim() || "#6da8ff";
-}
-
-// ---------------- Lightning --------------------
-let bolts = [];                 // 現存電弧
-let lastSpawnAt = 0;            // 上次觸發時間
-let emaEnergy = 0;              // 能量滑動平均
-const MAX_BOLTS = 6;            // 最大電弧數
-const COOLDOWN  = 70;           // 觸發冷卻(ms)
-
-function spawnBolt(cx, cy, baseR, len, a, power) {
-  const seg    = 10 + Math.floor(10 * power);
-  const jitter = 6 + 20 * power;
-  const pts = [];
-  for (let i = 0; i <= seg; i++) {
-    const t = i / seg;
-    const r = baseR + t * len;
-    const ang = a + (Math.random() - 0.5) * 0.06; // 微偏
-    const jx = (Math.random() - 0.5) * jitter;
-    const jy = (Math.random() - 0.5) * jitter;
-    pts.push([ cx + Math.cos(ang) * r + jx, cy + Math.sin(ang) * r + jy ]);
-  }
-  bolts.push({ pts, life: 220 + 180 * Math.random(), alpha: 0.85, width: 2 + 1.5 * power });
-  if (bolts.length > MAX_BOLTS) bolts.shift();
-}
-
-function renderBolts(dt) {
-  if (!bolts.length) return;
-  const accent = getAccent();
-  ctx.save();
-  ctx.globalCompositeOperation = "lighter";
-  ctx.lineCap = "round";
-  for (let i = bolts.length - 1; i >= 0; i--) {
-    const b = bolts[i];
-    b.life  -= dt;
-    b.alpha *= 0.92;
-    b.width *= 0.98;
-    if (b.life <= 0 || b.alpha < 0.05) { bolts.splice(i,1); continue; }
-
-    // 外層發光
-    ctx.shadowColor = accent;
-    ctx.shadowBlur  = 14;
-    ctx.globalAlpha = b.alpha;
-    ctx.lineWidth   = b.width;
-    ctx.strokeStyle = accent;
-    ctx.beginPath();
-    const p0 = b.pts[0]; ctx.moveTo(p0[0], p0[1]);
-    for (let k = 1; k < b.pts.length; k++) ctx.lineTo(b.pts[k][0], b.pts[k][1]);
-    ctx.stroke();
-
-    // 內芯
-    ctx.shadowBlur  = 0;
-    ctx.globalAlpha = Math.min(1, b.alpha + 0.15);
-    ctx.lineWidth   = Math.max(1, b.width * 0.6);
-    ctx.stroke();
-  }
-  ctx.restore();
-}
-
-// --------------- Main Draw Loop ---------------
-let BINS = 64;                       // 64 根；低 FPS 時自動降到 48
-let lastTS = performance.now(), frames = 0, fps = 60;
 
 function draw() {
-  const W = (canvas.width / DPR), H = (canvas.height / DPR), cx = W/2, cy = H/2;
-  const radius = Math.min(W,H) * 0.34;
-  const ring   = radius + 52;
-  const data   = new Uint8Array(analyser.frequencyBinCount);
+  const W = canvas.width, H = canvas.height, cx = W / 2, cy = H / 2;
+  const radius = Math.min(W, H) * CFG.ringRadiusRatio;
+  const ring = radius + CFG.ringOffset;
+  const bins = CFG.bins;
 
-  let prev = performance.now();
   (function loop(){
     rafId = requestAnimationFrame(loop);
     analyser.getByteFrequencyData(data);
-    ctx.clearRect(0,0,W,H);
+    ctx.clearRect(0, 0, W, H);
 
-    // FPS 偵測（每秒）
-    frames++; const now = performance.now();
-    if (now - lastTS >= 1000) { fps = frames; frames = 0; lastTS = now; }
-    const bins = (fps < 45) ? Math.min(BINS, 48) : BINS;
+    // 取樣：把原始頻譜塞到指定的 bins
+    const step = Math.floor(data.length / bins) || 1;
+    const { avg, bass } = computeLevels(data);
 
-    const step = Math.floor(data.length / bins);
+    // —— 七彩漸層的等化條（依角度轉 HSL 色相） + 低頻加權 —— //
+    ctx.save();
+    ctx.globalCompositeOperation = "lighter"; // 顏色相加，讓光感更漂亮
+    for (let i = 0; i < bins; i++) {
+      // 基礎值
+      const v = data[i * step] / 255;
 
-    // 彩虹色相偏移（每秒旋轉 30 度）
-    const tsec = performance.now() / 1000;
-    const hueOffset = (tsec * 30) % 360;
+      // 低頻加權：靠近第 0 條權重較高；平方讓過渡更平滑
+      const lowWeight = Math.pow(1 - i / bins, 2) * (CFG.bassBoost - 1) + 1;
+      const boosted = Math.min(1, v * lowWeight);
 
-    // —— 畫七彩頻譜，並計算能量（供閃電觸發） ——
-    let energy = 0, hi = 0;
-    for (let i=0; i<bins; i++){
-      const v = data[i*step] / 255;     // 0~1
-      energy += v;
-      if (i > bins * 0.55) hi += v;     // 偏重中高頻
-      const bar = 24 + v * 160;         // 主柱高度
-      const a   = (i / bins) * Math.PI * 2;
+      // 條長度
+      const bar = CFG.barBase + boosted * CFG.barGain;
 
-      const x1 = cx + Math.cos(a) * radius,       y1 = cy + Math.sin(a) * radius;
-      const x2 = cx + Math.cos(a) * (radius+bar), y2 = cy + Math.sin(a) * (radius+bar);
+      // 角度與座標
+      const a = (i / bins) * Math.PI * 2;
+      const x1 = cx + Math.cos(a) * radius, y1 = cy + Math.sin(a) * radius;
+      const x2 = cx + Math.cos(a) * (radius + bar), y2 = cy + Math.sin(a) * (radius + bar);
 
-      // 七彩上色（HSL），透明度跟音量走
-      const hue   = (i / bins) * 360 + hueOffset;
-      const alpha = 0.25 + 0.65 * v;
-      ctx.strokeStyle = `hsla(${hue.toFixed(1)}, 88%, 55%, ${alpha.toFixed(3)})`;
-      ctx.lineWidth   = 3.5;
-      ctx.beginPath(); ctx.moveTo(x1,y1); ctx.lineTo(x2,y2); ctx.stroke();
+      // 彩虹顏色：色相依角度 0~360；亮度隨音量浮動
+      const hue = (i / bins) * 360;
+      const light = 40 + boosted * 40; // 40%~80%
+      const color = `hsl(${hue}, 100%, ${light}%)`;
+
+      // 發光隨當下條的能量增強
+      ctx.strokeStyle = color;
+      ctx.lineWidth = 3.5;
+      ctx.shadowColor = color;
+      ctx.shadowBlur = 4 + boosted * 28;
+
+      ctx.beginPath();
+      ctx.moveTo(x1, y1);
+      ctx.lineTo(x2, y2);
+      ctx.stroke();
     }
+    ctx.restore();
 
-    // —— 閃電觸發（瞬態偵測） ——
-    const avg = energy / bins;
-    emaEnergy = emaEnergy ? (emaEnergy * 0.9 + avg * 0.1) : avg;
-    const impulse   = (avg - emaEnergy) + (hi / bins) * 0.15;
-    const threshold = 0.08;
-    const now2 = performance.now();
-    if (impulse > threshold && (now2 - lastSpawnAt) > COOLDOWN) {
-      lastSpawnAt = now2;
-      const power = Math.min(1, impulse * 6);
-      const n = 1 + Math.floor(2.5 * power);  // 1~3 道
-      for (let k = 0; k < n; k++) {
-        const a = Math.random() * Math.PI * 2;
-        const len = 70 + 220 * power + Math.random() * 50;
-        spawnBolt(cx, cy, radius, len, a, power);
-      }
-    }
+    // —— 環狀光暈（glow）：根據整體音量擴散 —— //
+    // 用平均音量 + 少許低頻加權做亮度基礎
+    const vol = Math.min(1, avg * 0.7 + bass * 0.6);
+    const glow = 8 + vol * CFG.glowScale;
 
-    // —— 進度圓弧 ——
-    const d = audio.duration || 0, ct = audio.currentTime || 0, p = d > 0 ? ct/d : 0;
-    const s = -Math.PI/2, e = s + p * Math.PI * 2;
-
-    // 背景圓弧
-    ctx.strokeStyle = "rgba(255,255,255,.18)";
-    ctx.lineWidth   = 10;
-    ctx.beginPath(); ctx.arc(cx,cy,ring,0,Math.PI*2); ctx.stroke();
-
-    // 主題色（CSS 變數 --accent）
-    const accent = getAccent();
-
-    // 前景進度弧
+    ctx.save();
+    ctx.globalCompositeOperation = "lighter";
+    // 讀取 CSS 主題色（影響進度弧線與光暈色調）
+    const accent = getComputedStyle(document.documentElement)
+      .getPropertyValue('--accent').trim() || "#6da8ff";
     ctx.strokeStyle = accent;
-    ctx.lineCap     = "round";
-    ctx.beginPath(); ctx.arc(cx,cy,ring,s,e,false); ctx.stroke();
+    ctx.lineWidth = 12;
+    ctx.lineCap = "round";
+    ctx.shadowBlur = glow * 1.4;
+    ctx.shadowColor = accent;
 
-    // 動態光暈（平均音量）
-    const glowR = ring + 16 + avg * 30;
-    const g = ctx.createRadialGradient(cx,cy,ring, cx,cy, glowR);
-    g.addColorStop(0, "rgba(0,0,0,0)");
-    g.addColorStop(1, `${accent}33`.replace('#','%23'));
-    ctx.fillStyle = g;
-    ctx.beginPath(); ctx.arc(cx,cy,glowR,0,Math.PI*2); ctx.fill();
+    // 畫一圈柔光（完整 360°）
+    ctx.beginPath();
+    ctx.arc(cx, cy, ring + 16, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.restore();
 
-    // —— 電弧（最後疊加） ——
-    const nowFrame = performance.now();
-    const dt = nowFrame - prev; prev = nowFrame;
-    renderBolts(dt);
+    // —— 圓弧進度（維持原設計，用主題色） —— //
+    const d = audio.duration || 0, ct = audio.currentTime || 0, p = d > 0 ? (ct / d) : 0;
+    const s = -Math.PI / 2, e = s + p * Math.PI * 2;
+
+    // 背景弧
+    ctx.strokeStyle = "rgba(255,255,255,.18)";
+    ctx.lineWidth = 10;
+    ctx.beginPath(); ctx.arc(cx, cy, ring, 0, Math.PI * 2); ctx.stroke();
+
+    // 進度弧（主題色）
+    const accent2 = getComputedStyle(document.documentElement)
+      .getPropertyValue('--accent').trim() || "#6da8ff";
+    ctx.strokeStyle = accent2;
+    ctx.lineCap = "round";
+    ctx.beginPath(); ctx.arc(cx, cy, ring, s, e, false); ctx.stroke();
   })();
 }
 
-// 使用者互動後啟動（避免 Autoplay 限制）
-["click","keydown","pointerdown","touchstart"].forEach(ev =>
-  window.addEventListener(ev, () => { ensureResumed(); }, { passive:true })
+// 使用者互動後啟動 AudioContext（避免 Autoplay policy）
+['click','keydown','pointerdown','touchstart'].forEach(ev =>
+  window.addEventListener(ev, () => {
+    try {
+      ensureAudioGraph();
+      if (audioCtx.state === 'suspended') audioCtx.resume();
+    } catch {}
+  }, { passive:true })
 );
 
-// 播放時開啟繪製
 audio.addEventListener("play", () => {
-  ensureResumed();
+  ensureAudioGraph();
+  if (audioCtx.state === "suspended") audioCtx.resume();
   cancelAnimationFrame(rafId);
   draw();
 });

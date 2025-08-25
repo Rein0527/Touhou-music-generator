@@ -8,23 +8,19 @@
     ```json
     [
       {
-        "file": "music/th10/Artist - Title.mp3",
+        "/Touhou-music-generator/music/th01/Artist - Title.mp3",
         "title": "Title",
         "artist": "Artist",
-        "tags": ["touhou", "th10", "artist", "title"]
       }
     ]
     ```
 
-- `images.json`  
-  - 依照 `tracks.json` 的 tags 從 Danbooru API 擷取「rating:safe」圖片生成  
+- `tags.json`  
+  - 依照 `tags.json` 的 tags 從 Danbooru API 擷取「rating:safe」圖片生成  
   - 格式範例：
     ```json
     {
-      "touhou": [
-        { "url": "https://danbooru.donmai.us/data/__xxx.jpg", "source": "post:123456" }
-      ],
-      "th10": [...]
+      "/Touhou-music-generator/music/th01/2.%E6%B0%B8%E9%81%A0%E3%81%AE%E5%B7%AB%E5%A5%B3.mp3":{"bgTag": "hakurei_reimu"},
     }
     ```
 

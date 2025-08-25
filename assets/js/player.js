@@ -41,18 +41,43 @@ export function currentTrack() {
   return STATE.tracks[gi];
 }
 
-// 載入 tracks.json（必要）
+// 載入 tracks.json（必要） + 併入 data/tags.json（可選）
 export async function loadTracks() {
   try {
     const res = await fetch(`${PAGE_BASE}data/tracks.json`, { cache: "no-store" });
     if (!res.ok) throw new Error(res.status + " " + res.statusText);
     const arr = await res.json();
-    STATE.tracks = (arr || []).map(t => ({
+
+    let tracks = (arr || []).map(t => ({
       ...t,
       title: t.title || t.name || (t.file || t.src || "").split("/").pop(),
       artist: t.artist || "",
       file: resolveFile(t.file || t.src || t.url || "")
     }));
+
+    // 讀取覆寫表 data/tags.json（若不存在就跳過）
+    try {
+      const tagRes = await fetch(`${PAGE_BASE}data/tags.json`, { cache: "no-store" });
+      if (tagRes.ok) {
+        const tagMap = await tagRes.json();
+        tracks = tracks.map(tr => {
+          const f = tr.file || "";
+          // 先完整鍵匹配
+          let ov = tagMap[f];
+          if (!ov) {
+            // 完整鍵不在 → 嘗試片段包含匹配（允許你只寫檔名或資料夾關鍵字）
+            for (const k of Object.keys(tagMap)) {
+              if (k && f.includes(k)) { ov = tagMap[k]; break; }
+            }
+          }
+          return ov ? { ...tr, ...ov } : tr; // 例如 { bgTag: "flandre_scarlet" }
+        });
+      }
+    } catch (e) {
+      console.warn("load tags.json failed:", e);
+    }
+
+    STATE.tracks = tracks;
   } catch (e) {
     console.warn("load tracks.json failed:", e);
     STATE.tracks = [];
@@ -81,9 +106,11 @@ export async function playCurrent() {
   try {
     await audio.play();
     updateNowPlayingUI(true);
-    // 首次播放時，若啟用背景 → 確保有預載，並在預載完成後「按排程」切換
+
+    // 換歌：清掉上一首的預載 → 立即以「該曲目」的 tag 抓圖並切換
     if (STATE.bgEnabled) {
-      await ensurePreload(); // 不阻塞切換計時；只是確保 pipeline 在跑
+      nextReady = null; preloading = null;
+      await updateDanbooruBackground(t, /*force*/ true);
     }
   } catch (e) {
     console.warn("audio play error:", e);
@@ -163,7 +190,7 @@ export async function initPlayer() {
 
   if (STATE.bgEnabled) {
     // 一開始就預載第一張，載好後立刻顯示（不等計時，避免空白）
-    await preloadNext(true);
+    await preloadNext(true, /*track*/ null);
     await swapToNext(/*immediate*/true);
   }
 }
@@ -179,14 +206,14 @@ function ratingToken(v){
   return map[v] || "general";
 }
 
-// ✅ 只產生「<單一主 tag> + rating」，主 tag 由使用者輸入，預設 touhou
-function buildTags() {
-  const baseRaw = (STATE.bgTag || "touhou").trim();
-  // 把空白轉底線，確保只是一個 Danbooru tag（避免多個 tag 觸發 422）
-  const base = baseRaw.replace(/\s+/g, "_") || "touhou";
-  const rating = `rating:${ratingToken(STATE.bgRating)}`;
-  // 僅兩個 tag，並移除任何 random:* 殘留
-  return `${base} ${rating}`.replace(/\brandom:\S+\b/gi, "").trim();
+// 產生查詢字串：優先使用「曲目覆寫的 bgTag」，否則退回全域 STATE.bgTag；並加上 rating
+function buildTags(track) {
+  const tagRaw = (track?.bgTag ?? STATE.bgTag ?? "touhou").trim();
+  // 允許多個 tag（空白分隔）；移除 random:* 殘留
+  const base = tagRaw.replace(/\s+/g, " ").replace(/\brandom:\S+\b/gi, "").trim() || "touhou";
+  const ratingRaw = (STATE.bgRating ?? "safe");
+  const rating = `rating:${ratingToken(ratingRaw)}`;
+  return `${base} ${rating}`.trim();
 }
 
 // ✅ 使用 random=true 當查詢參數（不要用 random:1 當成 tag）
@@ -208,14 +235,17 @@ let bgSwapping = false;         // 正在做淡入淡出
 let bgTimer = null;             // setInterval handler
 let lastSwapAt = 0;             // 上次實際切換時間戳
 
-async function preloadNext(forceNew = false) {
+async function preloadNext(forceNew = false, track = null) {
   if (!STATE.bgEnabled) return null;
   if (!forceNew && (nextReady || preloading)) return preloading || Promise.resolve(nextReady);
 
-  const tags = buildTags();
+  // 若未指定 track，預設用目前曲目（可確保自動輪播期間維持同一首的條件）
+  const t = track ?? currentTrack() ?? null;
+  const tags = buildTags(t);
+
   preloading = (async () => {
     let src = await fetchDanbooruUrl(tags);
-    if (!src) src = await fetchDanbooruUrl(buildTags()); // 備援：同一組條件再試一次
+    if (!src) src = await fetchDanbooruUrl(tags); // 同條件再試一次
     if (!src) return null;
 
     const img = new Image();
@@ -239,8 +269,8 @@ async function preloadNext(forceNew = false) {
   return nextReady;
 }
 
-async function ensurePreload() {
-  if (!nextReady && !preloading) await preloadNext(false);
+async function ensurePreload(track = null) {
+  if (!nextReady && !preloading) await preloadNext(false, track ?? currentTrack() ?? null);
 }
 
 async function swapToNext(immediate = false) {
@@ -285,10 +315,10 @@ async function swapToNext(immediate = false) {
 export async function updateDanbooruBackground(track, force = false) {
   if (!STATE.bgEnabled) return;
   if (force) {
-    await preloadNext(true);
+    await preloadNext(true, track ?? currentTrack() ?? null);
     await swapToNext(/*immediate*/true);
   } else {
-    ensurePreload();
+    ensurePreload(track ?? currentTrack() ?? null);
   }
 }
 
@@ -312,7 +342,7 @@ function maybeKickRotate() {
   clearBgTimer();
   const sec = Number(STATE.bgIntervalSec) || 0;
   if (STATE.bgEnabled && sec > 0 && !document.hidden && isPlaying()) {
-    ensurePreload(); // 確保下一張在下載
+    ensurePreload(); // 確保下一張在下載（會用 currentTrack 的條件）
     // 以固定間隔觸發「嘗試切換」。如果圖片尚未載好，會延後到載好後的下一個 tick。
     bgTimer = setInterval(async () => {
       if (!nextReady) {
@@ -348,13 +378,21 @@ export function setBgEnabled(v){
   applyBgGlass();
   if (v) {
     // 開啟時：預載並立刻顯示一張，避免空白
-    (async () => { await preloadNext(true); await swapToNext(true); maybeKickRotate(); })();
+    (async () => { await preloadNext(true, currentTrack() ?? null); await swapToNext(true); maybeKickRotate(); })();
   } else {
     clearBgTimer();
   }
 }
-export function setBgTag(tag){ STATE.bgTag = String(tag || "").trim() || "touhou"; nextReady=null; preloading=null; ensurePreload(); }
-export function setBgRating(r){ STATE.bgRating = (["safe","sensitive","questionable"].includes(r)) ? r : "safe"; nextReady=null; preloading=null; ensurePreload(); }
+export function setBgTag(tag){
+  STATE.bgTag = String(tag || "").trim() || "touhou";
+  nextReady = null; preloading = null;
+  ensurePreload(currentTrack() ?? null);
+}
+export function setBgRating(r){
+  STATE.bgRating = (["safe","sensitive","questionable"].includes(r)) ? r : "safe";
+  nextReady = null; preloading = null;
+  ensurePreload(currentTrack() ?? null);
+}
 export function setBgFit(v){ STATE.bgFit = (v === "contain") ? "contain" : "cover"; applyBgFit(); }
 export function setBgInterval(sec){
   STATE.bgIntervalSec = Math.max(0, Number(sec) || 0);

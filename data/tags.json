@@ -1,15 +1,15 @@
 {
   "/Touhou-music-generator/music/th01/11.%E3%81%84%E3%81%96%E3%80%81%E5%80%92%E3%82%8C%E9%80%9D%E3%81%8F%E3%81%9D%E3%81%AE%E6%99%82%E3%81%BE%E3%81%A7.mp3": {
-    "bgTag": "touhou"
+    "bgTag": "sariel_(touhou)"
   },
   "/Touhou-music-generator/music/th01/2.%E6%B0%B8%E9%81%A0%E3%81%AE%E5%B7%AB%E5%A5%B3.mp3": {
-    "bgTag": "hakurei_reimu"
+    "bgTag": "hakurei_reimu_(pc-98)"
   },
   "/Touhou-music-generator/music/th02/11.Complete%20Darkness.mp3": {
     "bgTag": "hakurei_reimu"
   },
   "/Touhou-music-generator/music/th03/15.Strawberry%20Crisis!!.mp3": {
-    "bgTag": "touhou"
+    "bgTag": "okazaki_yumemi"
   },
   "/Touhou-music-generator/music/th03/3.%E6%9D%B1%E6%96%B9%E5%A6%96%E6%81%8B%E8%AB%87.mp3": {
     "bgTag": "hakurei_reimu"
@@ -18,13 +18,13 @@
     "bgTag": "hakurei_reimu"
   },
   "/Touhou-music-generator/music/th03/6.Tabula%20rasa%E3%80%80%EF%BD%9E%20%E7%A9%BA%E7%99%BD%E5%B0%91%E5%A5%B3.mp3": {
-    "bgTag": "touhou"
+    "bgTag": "ellen_(touhou)"
   },
   "/Touhou-music-generator/music/th03/8.%E5%A4%A2%E6%B6%88%E5%A4%B1%E3%80%80%EF%BD%9E%20Lost%20Dream.mp3": {
     "bgTag": "hakurei_reimu"
   },
   "/Touhou-music-generator/music/th04/13.%E7%9C%A0%E3%82%8C%E3%82%8B%E6%81%90%E6%80%96%E3%80%80%EF%BD%9E%E3%80%80Sleeping%20Terror.mp3": {
-    "bgTag": "touhou"
+    "bgTag": "kazami_yuuka_(pc-98)"
   },
   "/Touhou-music-generator/music/th04/15.%E5%B9%BD%E5%A4%A2%E3%80%80%EF%BD%9E%E3%80%80Inanimate%20Dream.mp3": {
     "bgTag": "hakurei_reimu"
@@ -42,16 +42,16 @@
     "bgTag": "alice_margatroid"
   },
   "/Touhou-music-generator/music/th05/15.%E7%A5%9E%E8%A9%B1%E5%B9%BB%E6%83%B3%20%EF%BD%9E%20Infinite%20Being.mp3": {
-    "bgTag": "alice_margatroid"
+    "bgTag": "alice_margatroid_(pc-98)"
   },
   "/Touhou-music-generator/music/th05/16.%E4%B8%8D%E6%80%9D%E8%AD%B0%E3%81%AE%E5%9B%BD%E3%81%AE%E3%82%A2%E3%83%AA%E3%82%B9.mp3": {
     "bgTag": "hakurei_reimu"
   },
   "/Touhou-music-generator/music/th05/17.the%20Grimoire%20of%20Alice.mp3": {
-    "bgTag": "touhou"
+    "bgTag": "alice_margatroid_(pc-98)"
   },
   "/Touhou-music-generator/music/th05/6.Romantic%20Children.mp3": {
-    "bgTag": "touhou"
+    "bgTag": "alice_margatroid_(pc-98)"
   },
   "/Touhou-music-generator/music/th05/7.%E3%83%97%E3%83%A9%E3%82%B9%E3%83%81%E3%83%83%E3%82%AF%E3%83%9E%E3%82%A4%E3%83%B3%E3%83%89.mp3": {
     "bgTag": "touhou"

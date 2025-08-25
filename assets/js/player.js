@@ -1,451 +1,455 @@
-// 播放核心 + 資料載入 + queue 管理 + repeat/shuffle + Danbooru 背景（預載）+ 自動換圖 + 清晰背景
-export const STATE = {
+// assets/js/player.js
+// 核心播放器（雙 audio 暖機，切歌秒起；背景圖預載不阻塞）
+
+// ====== DOM ======
+const audio    = document.getElementById('audio');
+const audioPre = document.getElementById('audioPre');
+
+const elTitle  = document.getElementById('trackTitle');
+const elCurT   = document.getElementById('curTime');
+const elDurT   = document.getElementById('durTime');
+const elProg   = document.getElementById('progressBar');
+const elFill   = document.getElementById('progressFill');
+
+const btnPlay  = document.getElementById('play');
+const btnPrev  = document.getElementById('prev');
+const btnNext  = document.getElementById('next');
+
+const volRange = document.getElementById('volume');
+const btnMute  = document.getElementById('muteBtn');
+
+const bgA      = document.getElementById('bg');
+const bgB      = document.getElementById('bgNext');
+
+const chkRepeatOne = document.getElementById('toggleRepeatOne');
+const chkShuffle   = document.getElementById('toggleShuffle');
+const chkBg        = document.getElementById('toggleBg');
+const selRating    = document.getElementById('bgRating');
+const inpTag       = document.getElementById('bgTag');
+const selFit       = document.getElementById('bgFit');
+const inpInterval  = document.getElementById('bgInterval');
+const btnBgRefresh = document.getElementById('bgRefresh');
+const btnSaveSet   = document.getElementById('saveSettings');
+const btnDlBg      = document.getElementById('dlBgBtn');
+
+// ====== 狀態 ======
+const STATE = {
   tracks: [],
+  tagsMap: {},
   queue: [],
   qIndex: 0,
-  repeatMode: "off",   // "off" | "one" | "all"
-  shuffle: true,       // 預設開啟隨機播放
-  lastVolume: 1,
 
-  // 背景圖設定（供設定面板讀寫）
+  // 設定
+  repeatOne: false,
+  shuffle: true,         // 預設開啟隨機播放（你之前的需求）
   bgEnabled: true,
-  bgTag: "touhou",      // 全域預設主標籤（可被單曲覆寫）
-  bgRating: "safe",     // safe | sensitive | questionable（safe 會映射到 rating:general）
-  bgFit: "contain",     // 預設 contain
-  bgIntervalSec: 10,    // 預設 10 秒自動換圖（0=停用）
+  bgRating: 'safe',
+  bgTag: '',
+  bgFit: 'cover',
+  bgInterval: 0,         // 0=停用自動換圖
 
-  // 目前已載入的背景圖（供下載）
-  bgSrc: "",
+  // 背景圖
+  bgCurrentUrl: null,
+  bgNextUrl: null,
+  bgTimer: null,
 };
 
-const audio = document.getElementById("audio");
+// 預載
+let preloadedIndex = -1;
 
-// 依部署環境推導 base path（個人頁 "/"；專案頁 "/repo/"）
-function detectBasePath() {
-  const p = window.location.pathname;
-  const base = p.replace(/index\.html$/,'');
-  return base.endsWith('/') ? base : base + '/';
+// ====== 工具 ======
+function clamp(n, lo, hi){ return Math.min(hi, Math.max(lo, n)); }
+function fmtTime(sec){
+  if (!isFinite(sec) || sec < 0) sec = 0;
+  const m = Math.floor(sec / 60);
+  const s = Math.floor(sec % 60).toString().padStart(2,'0');
+  return `${m}:${s}`;
 }
-const PAGE_BASE = detectBasePath();
-
-// 正規化檔案路徑
-function resolveFile(src) {
-  if (/^(https?:)?\/\//i.test(src)) return src;
-  if (src.startsWith('/')) return src;
-  return PAGE_BASE + src.replace(/^\.?\//,'');
-}
-
-// 目前曲目
-export function currentTrack() {
-  const gi = STATE.queue[STATE.qIndex];
-  return STATE.tracks[gi];
+function shuffleArray(arr){
+  const a = arr.slice();
+  for (let i=a.length-1;i>0;i--){
+    const j = Math.floor(Math.random()*(i+1));
+    [a[i],a[j]] = [a[j],a[i]];
+  }
+  return a;
 }
 
-// 載入 tracks.json（必要） + 併入 data/tags.json（可選）
-export async function loadTracks() {
+// ====== 播放清單與初始化 ======
+async function loadJSON(url){
+  // 不強制 no-store，讓瀏覽器快取 JSON
+  const res = await fetch(url);
+  if (!res.ok) throw new Error(`Fetch ${url} failed`);
+  return res.json();
+}
+
+async function boot(){
+  // 載入 tracks & tags
+  STATE.tracks = await loadJSON('assets/data/tracks.json').catch(async ()=>{
+    // 兼容舊路徑：根目錄 tracks.json
+    try { return await loadJSON('tracks.json'); }
+    catch(e){ throw e; }
+  });
+  STATE.tagsMap = await loadJSON('assets/data/tags.json').catch(async ()=>{
+    try { return await loadJSON('tags.json'); }
+    catch(e){ return {}; }
+  });
+
+  // 組 queue
+  STATE.queue = STATE.tracks.map((_, i)=>i);
+  if (STATE.shuffle) STATE.queue = shuffleArray(STATE.queue);
+
+  // 還原設定
   try {
-    const res = await fetch(`${PAGE_BASE}data/tracks.json`, { cache: "no-store" });
-    if (!res.ok) throw new Error(res.status + " " + res.statusText);
-    const arr = await res.json();
-
-    let tracks = (arr || []).map(t => ({
-      ...t,
-      title: t.title || t.name || (t.file || t.src || "").split("/").pop(),
-      artist: t.artist || "",
-      file: resolveFile(t.file || t.src || t.url || "")
-    }));
-
-    // 讀取覆寫表 data/tags.json（若不存在就跳過）
-    try {
-      const tagRes = await fetch(`${PAGE_BASE}data/tags.json`, { cache: "no-store" });
-      if (tagRes.ok) {
-        const tagMap = await tagRes.json();
-        tracks = tracks.map(tr => {
-          const f = tr.file || "";
-          // 先完整鍵匹配
-          let ov = tagMap[f];
-          if (!ov) {
-            // 完整鍵不在 → 嘗試片段包含匹配（允許你只寫檔名或資料夾關鍵字）
-            for (const k of Object.keys(tagMap)) {
-              if (k && f.includes(k)) { ov = tagMap[k]; break; }
-            }
-          }
-          return ov ? { ...tr, ...ov } : tr; // 例如 { bgTag: "flandre_scarlet" }
-        });
-      }
-    } catch (e) {
-      console.warn("load tags.json failed:", e);
+    const raw = localStorage.getItem('tm_settings');
+    if (raw){
+      const cfg = JSON.parse(raw);
+      Object.assign(STATE, {
+        repeatOne : !!cfg.repeatOne,
+        shuffle   : !!cfg.shuffle,
+        bgEnabled : !!cfg.bgEnabled,
+        bgRating  : cfg.bgRating ?? 'safe',
+        bgTag     : cfg.bgTag ?? '',
+        bgFit     : cfg.bgFit ?? 'cover',
+        bgInterval: Number(cfg.bgInterval ?? 0)
+      });
     }
+  } catch(e){}
 
-    STATE.tracks = tracks;
-  } catch (e) {
-    console.warn("load tracks.json failed:", e);
-    STATE.tracks = [];
-  }
-  rebuildQueue();
+  // 套到 UI
+  chkRepeatOne.checked = STATE.repeatOne;
+  chkShuffle.checked   = STATE.shuffle;
+  chkBg.checked        = STATE.bgEnabled;
+  selRating.value      = STATE.bgRating;
+  inpTag.value         = STATE.bgTag;
+  selFit.value         = STATE.bgFit;
+  inpInterval.value    = STATE.bgInterval || '';
+
+  // 音量
+  audio.volume = Number(localStorage.getItem('tm_vol') ?? 1);
+  volRange.value = audio.volume.toString();
+
+  // 事件
+  wireEvents();
+
+  // 播第一首 & 預載下一首
+  await playCurrent();
+  const nxt = getNextIndex(STATE.queue[STATE.qIndex]);
+  preloadNextIfNeeded(nxt);
+  startBgAutoTimer();
 }
 
-// 建立 queue（支援 shuffle）
-export function rebuildQueue() {
-  STATE.queue = STATE.tracks.map((_, i) => i);
-  if (STATE.shuffle) {
-    for (let i = STATE.queue.length - 1; i > 0; i--) {
-      const j = Math.floor(Math.random() * (i + 1));
-      [STATE.queue[i], STATE.queue[j]] = [STATE.queue[j], STATE.queue[i]];
+// ====== 事件 ======
+function wireEvents(){
+  btnPlay.addEventListener('click', togglePlay);
+  btnPrev.addEventListener('click', prev);
+  btnNext.addEventListener('click', next);
+
+  volRange.addEventListener('input', e=>{
+    audio.volume = Number(e.target.value);
+    localStorage.setItem('tm_vol', audio.volume);
+  });
+  btnMute.addEventListener('click', ()=>{
+    audio.muted = !audio.muted;
+    btnMute.textContent = audio.muted ? '🔇' : '🔊';
+  });
+
+  // 時間與進度
+  audio.addEventListener('timeupdate', updateProgress);
+  audio.addEventListener('durationchange', updateProgress);
+  elProg.addEventListener('click', onSeek);
+
+  // 播完
+  audio.addEventListener('ended', ()=>{
+    if (STATE.repeatOne){
+      audio.currentTime = 0;
+      audio.play().catch(()=>{});
+    } else {
+      next();
     }
-  }
-  STATE.qIndex = 0;
-  updateNowPlayingUI();
+  });
+
+  // 設定
+  chkRepeatOne.addEventListener('change', ()=>{
+    STATE.repeatOne = chkRepeatOne.checked;
+    saveSettings();
+  });
+  chkShuffle.addEventListener('change', ()=>{
+    const turnOn = chkShuffle.checked;
+    if (turnOn !== STATE.shuffle){
+      STATE.shuffle = turnOn;
+      rebuildQueueKeepingCurrent();
+      saveSettings();
+    }
+  });
+  chkBg.addEventListener('change', ()=>{
+    STATE.bgEnabled = chkBg.checked;
+    saveSettings();
+  });
+  selRating.addEventListener('change', ()=>{ STATE.bgRating = selRating.value; saveSettings(); });
+  inpTag.addEventListener('change', ()=>{ STATE.bgTag = inpTag.value.trim(); saveSettings(); });
+  selFit.addEventListener('change', ()=>{
+    STATE.bgFit = selFit.value; saveSettings(); applyBgFit();
+  });
+  inpInterval.addEventListener('change', ()=>{
+    STATE.bgInterval = Number(inpInterval.value || 0);
+    saveSettings(); startBgAutoTimer();
+  });
+  btnBgRefresh.addEventListener('click', ()=> updateDanbooruBackground(currentTrack(), /*force*/true));
+  btnSaveSet.addEventListener('click', saveSettings);
+
+  // 下載背景
+  btnDlBg.addEventListener('click', ()=>{
+    const url = STATE.bgCurrentUrl || STATE.bgNextUrl;
+    if (!url) return;
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'background.jpg';
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+  });
 }
 
-// ---- 播放控制 ----
-export async function playCurrent() {
-  const t = currentTrack();
+function saveSettings(){
+  localStorage.setItem('tm_settings', JSON.stringify({
+    repeatOne : STATE.repeatOne,
+    shuffle   : STATE.shuffle,
+    bgEnabled : STATE.bgEnabled,
+    bgRating  : STATE.bgRating,
+    bgTag     : STATE.bgTag,
+    bgFit     : STATE.bgFit,
+    bgInterval: STATE.bgInterval,
+  }));
+}
+
+// ====== 進度條 ======
+function updateProgress(){
+  const cur = audio.currentTime || 0;
+  const dur = audio.duration || 0;
+  elCurT.textContent = fmtTime(cur);
+  elDurT.textContent = fmtTime(dur);
+  const pct = dur ? (cur / dur) * 100 : 0;
+  elProg.setAttribute('aria-valuenow', String(Math.floor(pct)));
+  elFill.style.width = `${pct}%`;
+}
+function onSeek(e){
+  const rect = elProg.getBoundingClientRect();
+  const x = clamp((e.clientX - rect.left) / rect.width, 0, 1);
+  const dur = audio.duration || 0;
+  if (dur > 0){
+    audio.currentTime = x * dur;
+  }
+}
+
+// ====== 播放與預載 ======
+function currentTrack(){
+  const idx = STATE.queue[STATE.qIndex];
+  return STATE.tracks[idx];
+}
+function getNextIndex(curIndexInTracks){
+  if (STATE.repeatOne) return curIndexInTracks;
+  // 依 queue 找下一首
+  const qi = STATE.qIndex;
+  const nextQi = (qi + 1) % STATE.queue.length;
+  return STATE.queue[nextQi];
+}
+function rebuildQueueKeepingCurrent(){
+  const curTrackIdx = STATE.queue[STATE.qIndex];
+  let newQueue = STATE.tracks.map((_,i)=>i);
+  if (STATE.shuffle) newQueue = shuffleArray(newQueue);
+
+  // 把目前曲目移到新 queue 中的對應位置，維持「現在這首」不變
+  const pos = newQueue.indexOf(curTrackIdx);
+  if (pos !== -1){
+    // 旋轉 queue，讓 pos 成為 qIndex
+    STATE.qIndex = 0;
+    STATE.queue = newQueue.slice(pos).concat(newQueue.slice(0,pos));
+  } else {
+    STATE.queue = newQueue;
+    STATE.qIndex = 0;
+  }
+}
+
+async function preloadNextIfNeeded(nextIndex){
+  if (preloadedIndex === nextIndex) return;
+  preloadedIndex = -1;
+
+  const t = STATE.tracks[nextIndex];
   if (!t) return;
 
-  // 只有在曲目真的改變時才指定 src，避免續播時從 0 秒開始
-  const cur = audio.src || "";
-  const want = new URL(t.file, window.location.href).href;
-  const changed = (cur !== want);
-  if (changed) audio.src = t.file;
+  audioPre.crossOrigin = 'anonymous';
+  audioPre.src = t.file;   // 相對路徑即可，建議原始 tracks.json 就已 encodeURI
+  audioPre.load();
 
-  try {
-    await audio.play();
-    updateNowPlayingUI(true);
+  await new Promise((res)=>{
+    let done = false;
+    const clean = ()=>{
+      audioPre.removeEventListener('canplay', onReady);
+      audioPre.removeEventListener('error', onErr);
+    };
+    const onReady = ()=>{ if (done) return; done = true; clean(); res(); };
+    const onErr   = ()=>{ if (done) return; done = true; clean(); res(); };
+    audioPre.addEventListener('canplay', onReady, {once:true});
+    audioPre.addEventListener('error', onErr, {once:true});
+  });
 
-    // 只有換歌時才重置背景預載並以該曲的 tag 強制刷新
-    if (STATE.bgEnabled && changed) {
-      nextReady = null; preloading = null;
-      await updateDanbooruBackground(t, /*force*/ true);
-    }
-  } catch (e) {
-    console.warn("audio play error:", e);
-  }
+  preloadedIndex = nextIndex;
 }
-export function pause() {
-  audio.pause();
-  updateNowPlayingUI(false);
-}
-export function togglePlay() {
-  // 還沒指定來源 → 正常開播；已指定且暫停 → 續播；正在播 → 暫停
-  if (!audio.src) { playCurrent(); return; }
-  if (audio.paused) { audio.play(); updateNowPlayingUI(true); }
-  else { pause(); }
-}
-export function next() {
-  if (STATE.repeatMode === "one") {
+
+async function switchTo(indexInTracks){
+  const t = STATE.tracks[indexInTracks];
+  if (!t) return;
+
+  // 如果這首已預載：直接把 src 換成預載那支（保持同一個 <audio>：viz.js 不需重綁）
+  if (preloadedIndex === indexInTracks && audioPre.src){
+    const vol = audio.volume, muted = audio.muted;
+    try { audio.pause(); } catch(e){}
+
+    audio.src = audioPre.src;
     audio.currentTime = 0;
-    playCurrent();
-    return;
+    audio.volume = vol;
+    audio.muted  = muted;
+
+    try { await audio.play(); } catch(e){}
+    preloadedIndex = -1; // 讓預載器可以去抓再下一首
+  } else {
+    // 沒預載成功：保守做法
+    audio.src = t.file;
+    try { await audio.play(); } catch(e){}
   }
-  STATE.qIndex++;
-  if (STATE.qIndex >= STATE.queue.length) {
-    if (STATE.repeatMode === "all") STATE.qIndex = 0;
-    else return;
+
+  // 非阻塞更新背景圖
+  if (STATE.bgEnabled){
+    updateDanbooruBackground(t, /*force*/false);
   }
+
+  // UI
+  elTitle.textContent = t.title || '—';
+
+  // 下一首預載（背景進行）
+  const willPre = getNextIndex(indexInTracks);
+  preloadNextIfNeeded(willPre);
+}
+
+async function playCurrent(){
+  const idxInTracks = STATE.queue[STATE.qIndex];
+  await switchTo(idxInTracks);
+}
+
+function next(){
+  if (!STATE.queue.length) return;
+  STATE.qIndex = (STATE.qIndex + 1) % STATE.queue.length;
   playCurrent();
 }
-export function prev() {
+function prev(){
+  if (!STATE.queue.length) return;
   STATE.qIndex = (STATE.qIndex - 1 + STATE.queue.length) % STATE.queue.length;
   playCurrent();
 }
-audio.addEventListener("ended", next);
 
-// 音量 / 靜音
-export function setVolume(v) {
-  const nv = Math.max(0, Math.min(1, v));
-  audio.volume = nv;
-  if (nv > 0) STATE.lastVolume = nv;
-  updateMuteIcon();
-}
-export function toggleMute() {
-  if (audio.volume > 0) { STATE.lastVolume = audio.volume; setVolume(0); }
-  else { setVolume(STATE.lastVolume || 1); }
-}
-
-// ---- UI 狀態（按鈕圖示、播放清單高亮、標題）----
-export function updateNowPlayingUI(isPlaying = !audio.paused) {
-  const playBtn = document.getElementById("play");
-  if (playBtn) playBtn.textContent = isPlaying ? "⏸" : "▶";
-
-  const list = document.getElementById("playlistItems");
-  const gi = STATE.queue[STATE.qIndex];
-  if (list) {
-    const items = list.querySelectorAll("li");
-    items.forEach(el => el.classList.remove("active"));
-    const active = list.querySelector(`[data-gi="${gi}"]`);
-    if (active) active.classList.add("active");
-  }
-
-  const titleEl = document.getElementById("trackTitle");
-  const t = currentTrack();
-  if (titleEl) titleEl.textContent = t ? (t.title || (t.file.split("/").pop() || "—")) : "—";
-}
-export function updateMuteIcon() {
-  const muteBtn = document.getElementById("muteBtn");
-  if (muteBtn) muteBtn.textContent = (audio.volume > 0) ? "🔊" : "🔇";
-}
-
-// 初始呼叫：由 ui.js 觸發
-export async function initPlayer() {
-  await loadTracks();
-  setVolume(1);
-  updateNowPlayingUI(false);
-
-  // 預設背景參數
-  applyBgFit();    // contain
-  applyBgGlass();  // 顯示圖片時關閉模糊
-  setupBgAutoRotate();
-
-  if (STATE.bgEnabled) {
-    // 以當前曲目（通常是隊列第 0 首）的 tag 預載並顯示第一張，避免空白
-    await preloadNext(true, currentTrack() ?? null);
-    await swapToNext(/*immediate*/true);
-  }
-}
-
-/* ===================== 背景（Danbooru，含預載/按時切換） ===================== */
-
-const bg = document.getElementById("bg");
-const bgNext = document.getElementById("bgNext");
-
-// rating 對應（safe → general）
-function ratingToken(v){
-  const map = { safe: "general", sensitive: "sensitive", questionable: "questionable" };
-  return map[v] || "general";
-}
-
-// 產生查詢字串：優先使用「曲目覆寫的 bgTag」，否則退回全域 STATE.bgTag；並加上 rating
-function buildTags(track) {
-  const tagRaw = (track?.bgTag ?? STATE.bgTag ?? "touhou").trim();
-  // 允許多個 tag（空白分隔）；移除 random:* 殘留
-  const base = tagRaw.replace(/\s+/g, " ").replace(/\brandom:\S+\b/gi, "").trim() || "touhou";
-  const ratingRaw = (STATE.bgRating ?? "safe");
-  const rating = `rating:${ratingToken(ratingRaw)}`;
-  return `${base} ${rating}`.trim();
-}
-
-// ✅ 使用 random=true 當查詢參數（不要用 random:1 當成 tag）
-async function fetchDanbooruUrl(tags) {
-  const qs = `https://danbooru.donmai.us/posts.json?limit=1&random=true&tags=${encodeURIComponent(tags)}`;
-  const res = await fetch(qs, { cache: "no-store" });
-  if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
-  const arr = await res.json();
-  const p = arr && arr[0];
-  const candidate = p?.large_file_url || p?.file_url || p?.preview_file_url || p?.source;
-  const src = candidate ? (String(candidate).startsWith("http") ? candidate : `https://danbooru.donmai.us${candidate}`) : "";
-  return src;
-}
-
-// ---------- 預載管線 ----------
-let preloading = null;          // Promise<{src, img}> | null
-let nextReady = null;           // {src, img} | null
-let bgSwapping = false;         // 正在做淡入淡出
-let bgTimer = null;             // setInterval handler
-let lastSwapAt = 0;             // 上次實際切換時間戳
-
-async function preloadNext(forceNew = false, track = null) {
-  if (!STATE.bgEnabled) return null;
-  if (!forceNew && (nextReady || preloading)) return preloading || Promise.resolve(nextReady);
-
-  // 若未指定 track，預設用目前曲目（可確保自動輪播期間維持同一首的條件）
-  const t = track ?? currentTrack() ?? null;
-  const tags = buildTags(t);
-
-  preloading = (async () => {
-    let src = await fetchDanbooruUrl(tags);
-    if (!src) src = await fetchDanbooruUrl(tags); // 同條件再試一次
-    if (!src) return null;
-
-    const img = new Image();
-    img.decoding = "async";
-    // 為了之後可能需要下載 blob，先帶 CORS；失敗也不影響背景顯示
-    try { img.crossOrigin = "anonymous"; } catch {}
-
-    const loaded = await new Promise((resolve) => {
-      img.onload = () => resolve(true);
-      img.onerror = () => resolve(false);
-      img.src = src;
-    });
-    if (!loaded) return null;
-
-    return { src, img };
-  })();
-
-  const result = await preloading.catch(() => null);
-  nextReady = result || null;
-  preloading = null;
-  return nextReady;
-}
-
-async function ensurePreload(track = null) {
-  if (!nextReady && !preloading) await preloadNext(false, track ?? currentTrack() ?? null);
-}
-
-async function swapToNext(immediate = false) {
-  if (!STATE.bgEnabled) return;
-  if (bgSwapping) return;
-  if (!nextReady) await ensurePreload();
-  if (!nextReady) return; // 還是沒有就先放著，下個 tick 再試
-
-  const { src } = nextReady;
-
-  // 寫到 bgNext，等它完全 ready（事實上已 onload）→ 做 600ms 淡入
-  bgSwapping = true;
-  STATE.bgSrc = src;
-  bgNext.style.backgroundImage = `url("${src}")`;
-  // 如果是初始化第一張或手動「換一張」，允許立刻切（immediate=true）
-  if (immediate) {
-    bgNext.style.opacity = "1";
-    bg.style.opacity = "0";
+function togglePlay(){
+  if (audio.paused){
+    audio.play().catch(()=>{});
   } else {
-    // 照 CSS 600ms 動畫做切換
-    bgNext.style.opacity = "1";
-    bg.style.opacity = "0";
-  }
-
-  // 對齊 CSS 過場 600ms，多留 50ms buffer
-  setTimeout(() => {
-    bg.style.backgroundImage = `url("${src}")`;
-    bg.style.opacity = "1";
-    bgNext.style.opacity = "0";
-    bgSwapping = false;
-    lastSwapAt = Date.now();
-  }, 650);
-
-  // 立刻預載下一張，讓下一次到點可以秒切
-  nextReady = null;
-  ensurePreload();
-}
-
-// 供 UI 調用：
-// - force=true：立刻抓新圖並在載好後「立即」切換（忽略排程時間）
-// - force=false（預設）：只確保 pipeline 在跑，到點再切
-export async function updateDanbooruBackground(track, force = false) {
-  if (!STATE.bgEnabled) return;
-  if (force) {
-    await preloadNext(true, track ?? currentTrack() ?? null);
-    await swapToNext(/*immediate*/true);
-  } else {
-    ensurePreload(track ?? currentTrack() ?? null);
+    audio.pause();
   }
 }
 
-/* ---- 背景填充/玻璃化控制 ---- */
-function applyBgFit() {
-  document.documentElement.style.setProperty('--bg-fit', STATE.bgFit === 'contain' ? 'contain' : 'cover');
-}
-function applyBgGlass() {
-  // 顯示圖片：遮罩透明、blur=0；不顯示：遮罩恢復、blur=8px
-  document.documentElement.style.setProperty('--bg-dim', STATE.bgEnabled ? '0' : '1');
-  document.documentElement.style.setProperty('--bg-blur', STATE.bgEnabled ? '0px' : '8px');
+// ====== 背景圖（Danbooru） ======
+function applyBgFit(){
+  const fit = STATE.bgFit === 'contain' ? 'contain' : 'cover';
+  bgA.style.backgroundSize = fit;
+  bgB.style.backgroundSize = fit;
 }
 
-/* ---- 自動換圖排程（頁面在前景 + 正在播放時才輪換；到點才切） ---- */
-function clearBgTimer(){ if(bgTimer){ clearInterval(bgTimer); bgTimer = null; } }
-
-// ✅ 只有在播放中才會跑自動換圖
-function isPlaying() { return !audio.paused && !audio.ended; }
-
-function maybeKickRotate() {
-  clearBgTimer();
-  const sec = Number(STATE.bgIntervalSec) || 0;
-  if (STATE.bgEnabled && sec > 0 && !document.hidden && isPlaying()) {
-    ensurePreload(currentTrack() ?? null); // 以目前曲目的 tag 預載
-    // 以固定間隔觸發「嘗試切換」。如果圖片尚未載好，會延後到載好後的下一個 tick。
-    bgTimer = setInterval(async () => {
-      if (!nextReady) {
-        // 還沒載好 → 補啟預載，這次先略過，等下個 tick
-        ensurePreload(currentTrack() ?? null);
-        return;
-      }
-      await swapToNext(/*immediate*/false);
+function startBgAutoTimer(){
+  if (STATE.bgTimer){ clearInterval(STATE.bgTimer); STATE.bgTimer = null; }
+  const sec = Number(STATE.bgInterval || 0);
+  if (sec > 0){
+    STATE.bgTimer = setInterval(()=>{
+      if (STATE.bgEnabled) updateDanbooruBackground(currentTrack(), /*force*/false);
     }, sec * 1000);
   }
 }
 
-function setupBgAutoRotate() {
-  maybeKickRotate();
-
-  // 分頁前後景切換：回到前景「不強制切」，只重啟排程與預載
-  document.addEventListener('visibilitychange', () => {
-    if (!document.hidden && STATE.bgEnabled && isPlaying()) {
-      ensurePreload(currentTrack() ?? null);
-    }
-    maybeKickRotate();
+async function fetchDanbooruImageUrl(tag, rating){
+  // 取單張結果即可（order:random）
+  const qs = new URLSearchParams({
+    tags: `${tag} rating:${rating} -comic -4koma`,
+    limit: '1',
+    random: 'true'
   });
-
-  // 播放狀態變化 → 控制輪播
-  audio.addEventListener('play',  () => { ensurePreload(currentTrack() ?? null); maybeKickRotate(); });
-  audio.addEventListener('pause', () => { maybeKickRotate(); });
-  audio.addEventListener('ended', () => { maybeKickRotate(); });
+  const url = `https://danbooru.donmai.us/posts.json?${qs.toString()}`;
+  const res = await fetch(url, { cache: 'no-store' });
+  if (!res.ok) throw new Error('Danbooru API error');
+  const arr = await res.json();
+  const post = Array.isArray(arr) && arr[0];
+  // 優先原圖 -> 大圖 -> preview
+  return post?.file_url || post?.large_file_url || post?.preview_file_url || null;
 }
 
-/* ---- 設定存取（給 ui.js 用） ---- */
-export function setBgEnabled(v){
-  STATE.bgEnabled = !!v;
-  applyBgGlass();
-  if (v) {
-    // 開啟時：預載並立刻顯示一張，避免空白
-    (async () => { await preloadNext(true, currentTrack() ?? null); await swapToNext(true); maybeKickRotate(); })();
-  } else {
-    clearBgTimer();
-  }
-}
-export function setBgTag(tag){
-  STATE.bgTag = String(tag || "").trim() || "touhou";
-  nextReady = null; preloading = null;
-  ensurePreload(currentTrack() ?? null);
-}
-export function setBgRating(r){
-  STATE.bgRating = (["safe","sensitive","questionable"].includes(r)) ? r : "safe";
-  nextReady = null; preloading = null;
-  ensurePreload(currentTrack() ?? null);
-}
-export function setBgFit(v){ STATE.bgFit = (v === "contain") ? "contain" : "cover"; applyBgFit(); }
-export function setBgInterval(sec){
-  STATE.bgIntervalSec = Math.max(0, Number(sec) || 0);
-  maybeKickRotate();
-}
-export function getBgSettings(){
-  return {
-    enabled: STATE.bgEnabled,
-    tag: STATE.bgTag,
-    rating: STATE.bgRating,
-    fit: STATE.bgFit,
-    interval: STATE.bgIntervalSec,
-  };
+function parseTagFromTrack(track){
+  // 優先 tags.json map（key 請使用你 tracks.json 里的 "file" 完整路徑或 encodeURI 版本）
+  const key1 = track.file;
+  const key2 = encodeURI(track.file);
+  const obj = STATE.tagsMap[key1] || STATE.tagsMap[key2];
+  if (obj?.bgTag) return obj.bgTag;
+  // 其次用使用者設定的通用 tag
+  if (STATE.bgTag) return STATE.bgTag;
+  // 再不行就 fallback touhou
+  return 'touhou';
 }
 
-// ✅ 下載目前背景圖
-export async function downloadCurrentBg() {
+async function updateDanbooruBackground(track, force=false){
   try {
-    const src = STATE.bgSrc;
-    if (!src) throw new Error("目前沒有背景圖可以下載");
-
-    // 產生檔名
-    const url = new URL(src, window.location.href);
-    const nameGuess = url.pathname.split("/").pop() || "danbooru.jpg";
-    const fileName = nameGuess.split("?")[0] || "danbooru.jpg";
-
-    // 優先以 blob 下載（跨網域更穩）
-    const res = await fetch(src, { mode: "cors" });
-    if (!res.ok) throw new Error(`下載失敗：${res.status} ${res.statusText}`);
-    const blob = await res.blob();
-
-    const a = document.createElement("a");
-    const objectUrl = URL.createObjectURL(blob);
-    a.href = objectUrl;
-    a.download = fileName;
-    document.body.appendChild(a);
-    a.click();
-    a.remove();
-    URL.revokeObjectURL(objectUrl);
-  } catch (err) {
-    console.warn(err);
-    // CORS 報錯時退而求其次：直接開新視窗，讓使用者另存
-    if (STATE.bgSrc) window.open(STATE.bgSrc, "_blank");
+    const tag = parseTagFromTrack(track);
+    const rating = STATE.bgRating || 'safe';
+    // 若已有「下一張」且不是強制，直接切換即可（避免每次都打 API）
+    if (!force && STATE.bgNextUrl){
+      swapBgNow();
+      return;
+    }
+    // 下載新圖到 next（非阻塞）
+    const url = await fetchDanbooruImageUrl(tag, rating);
+    if (!url) return;
+    STATE.bgNextUrl = url;
+    // 預載圖片，載完才切
+    const ok = await preloadImage(url).catch(()=>false);
+    if (ok){
+      swapBgNow();
+    }
+  } catch(e){
+    // 靜默失敗即可，避免卡流程
   }
 }
 
-export { audio, PAGE_BASE };
+function preloadImage(url){
+  return new Promise((res, rej)=>{
+    const img = new Image();
+    img.onload = ()=> res(true);
+    img.onerror = rej;
+    img.src = url;
+  });
+}
+
+function swapBgNow(){
+  if (!STATE.bgNextUrl) return;
+  bgB.style.backgroundImage = `url("${STATE.bgNextUrl}")`;
+  applyBgFit();
+
+  // cross-fade
+  bgB.classList.add('show');
+  bgA.classList.remove('show');
+
+  // 交換角色
+  const tmpUrl = STATE.bgCurrentUrl;
+  STATE.bgCurrentUrl = STATE.bgNextUrl;
+  STATE.bgNextUrl = tmpUrl || null;
+
+  // 把舊圖放到底層
+  bgA.style.backgroundImage = `url("${STATE.bgCurrentUrl}")`;
+}
+
+// ====== 啟動 ======
+document.addEventListener('DOMContentLoaded', boot);
+export { audio }; // 給 viz.js 使用（若需要）

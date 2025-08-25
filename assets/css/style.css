@@ -1,197 +1,94 @@
+/* assets/css/style.css */
+/* 簡化版樣式：背景交錯淡入、底部控制列、抽屜與浮窗 */
+
 :root{
-  /* 新增主題色，整站共用 */
-  --accent: #bb71f3;
-
-  /* 既有變數 */
-  --bg-dim: 1;            /* 顯示圖片時 → 0；關閉圖片時 → 1 */
-  --bg-fit: contain;      /* 預設改成 contain */
-  --bg-blur: 0px;         /* 顯示圖片時關閉模糊；關閉背景時改為 8px */
+  --bg: #0b0d12;
+  --fg: #f8f9fb;
+  --muted: #9aa3b2;
+  --accent: #8ab4ff;
 }
 
-/* 背景與舞台 */
-html, body {
-  height:100%; margin:0; background:#0b0d12; color:#fff;
-  font-family:ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,"Noto Sans TC","Microsoft JhengHei",Arial;
-}
-.app{ position:relative; min-height:100%; overflow:hidden; }
-.bg,.bg-next{
+*{ box-sizing: border-box; }
+html,body{ height:100%; margin:0; }
+body{ background: var(--bg); color: var(--fg); font-family: ui-sans-serif, system-ui, -apple-system, "Microsoft JhengHei", "Noto Sans TC", sans-serif; }
+
+.app{ position:relative; min-height:100vh; overflow:hidden; }
+
+/* 背景與淡入 */
+.bg, .bg-next{
   position:absolute; inset:0;
-  background-position:center;
-  background-size: var(--bg-fit);
-  background-repeat: no-repeat;
-  filter: blur(var(--bg-blur)) saturate(1.05) brightness(0.74);
-  transform:scale(1.03);
-  /* ↓ 把 opacity 過場調成 600ms */
-  transition:opacity .6s ease, background-size .2s ease, filter .2s ease;
-}
-.bg{opacity:1}
-.bg-next{opacity:0}
-.bg-dim{
-  position:absolute; inset:0;
-  background:radial-gradient(ellipse at center,rgba(0,0,0,.2),rgba(0,0,0,.62) 58%,rgba(0,0,0,.82));
-  opacity: var(--bg-dim);
-  transition: opacity .25s ease;
-}
-.stage{ position:relative; z-index:5; display:grid; place-items:center; min-height:72vh; padding-top:5vh; gap:16px; }
-canvas{ width:min(78vmin,1040px); height:min(78vmin,1040px); aspect-ratio:1/1; touch-action:none; }
-
-/* 標題 + 進度條 */
-.nowplaying{ width:min(78vmin,1040px); display:grid; gap:6px; }
-.title{ font-weight:600; opacity:.95; text-align:center; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
-.scrub{ display:grid; grid-template-columns:auto 1fr auto; align-items:center; gap:12px; }
-.time{ font-variant-numeric:tabular-nums; opacity:.95; }
-.bar-outer{
-  position:relative; height:10px; border-radius:999px;
-  background:rgba(255,255,255,.15); overflow:hidden; cursor:pointer;
-}
-/* 改用 --accent 作為進度色 */
-.bar-inner{ position:absolute; inset:0 100% 0 0; background:var(--accent); border-radius:999px; }
-
-/* 播放清單（左側抽屜） */
-.playlist-panel{
-  position:fixed; top:0; left:-340px; width:340px; height:100%;
-  background:rgba(20,20,20,.85); backdrop-filter:blur(10px);
-  transition:left .3s ease; z-index:30; display:flex; flex-direction:column;
-}
-.playlist-panel.open{ left:0; }
-.playlist-header{ display:flex; justify-content:space-between; align-items:center; padding:12px; border-bottom:1px solid rgba(255,255,255,.15); }
-#playlistItems{ list-style:none; margin:0; padding:0; overflow-y:auto; flex:1; }
-#playlistItems li{ padding:10px 14px; cursor:pointer; border-bottom:1px solid rgba(255,255,255,.08); color:#ddd; }
-#playlistItems li:hover{ background:rgba(255,255,255,.12); color:#fff; }
-#playlistItems li.active{ background:rgba(187,113,243,.25); color:#fff; }
-
-/* 設定（右下角小浮窗） */
-.settings-flyout{
-  position:fixed; right:16px; bottom:84px; z-index:35;
-  width:320px; background:rgba(28,28,32,.92);
-  border:1px solid rgba(255,255,255,.12); border-radius:16px;
-  backdrop-filter:blur(12px);
-  transform:translateY(24px); opacity:0; pointer-events:none;
-  transition:transform .22s ease, opacity .22s ease;
-}
-.settings-flyout.open{ transform:translateY(0); opacity:1; pointer-events:auto; }
-.settings-header{ display:flex; justify-content:space-between; align-items:center; padding:10px 12px; border-bottom:1px solid rgba(255,255,255,.12);}
-.btn.icon.sm{ width:40px; height:40px; border-radius:50%; font-size:18px; }
-.settings-body{ padding:10px 12px 14px; display:flex; flex-direction:column; gap:10px; }
-.row{ display:flex; align-items:center; justify-content:space-between; gap:10px; }
-.row .sub{ opacity:.9; font-size:12px; }
-.sep{ height:1px; background:rgba(255,255,255,.12); margin:4px 0; }
-.input{
-  flex:1; min-width:0;
-  background:rgba(255,255,255,.08); border:1px solid rgba(255,255,255,.18);
-  color:#fff; border-radius:10px; padding:8px 10px; outline:none;
-}
-/* focus 邊框也跟著主題色 */
-.input:focus{ border-color:var(--accent); }
-.actions{ display:flex; gap:8px; justify-content:flex-end; }
-.btn{ appearance:none; border:none; color:#fff;
-  background:linear-gradient(180deg,rgba(33,41,54,.65),rgba(18,23,33,.65));
-  border-radius:12px; cursor:pointer; user-select:none; transition:all .2s ease; padding:8px 12px;
-}
-.btn.ghost{ background:transparent; border:1px solid rgba(255,255,255,.2); }
-.btn.icon{ width:60px; height:60px; border-radius:50%; font-size:26px; }
-.btn.icon:hover,.btn:hover{ background:rgba(255,255,255,.25); transform:translateY(-2px); }
-.btn.icon:active,.btn:active{ transform:translateY(2px) scale(.95); background:rgba(255,255,255,.3); }
-
-/* toggle switch */
-.switch{ position:relative; display:inline-block; width:46px; height:24px; }
-.switch input{ display:none; }
-.slider{ position:absolute; cursor:pointer; inset:0; background:#777; transition:.2s; border-radius:24px; }
-.slider:before{ content:""; position:absolute; height:18px; width:18px; left:3px; bottom:3px; background:#fff; transition:.2s; border-radius:50%; }
-input:checked + .slider{ background:#4caf50; }
-input:checked + .slider:before{ transform:translateX(22px); }
-
-/* 下拉選單樣式（修正文字看不到問題） */
-.settings-flyout select,
-.settings-flyout select.input{
-  appearance: none; -webkit-appearance:none; -moz-appearance:none;
-  width: 100%;
-  padding: 8px 28px 8px 10px;
-  border-radius: 10px;
-  border: 1px solid rgba(255,255,255,.18);
-  background-color: rgba(255,255,255,.08);
-  color: #fff; font-size: 14px; outline: none; line-height: 1.2; cursor: pointer;
-  background-image:
-    linear-gradient(transparent, transparent),
-    url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='14' height='14' viewBox='0 0 24 24' fill='white'><path d='M7 10l5 5 5-5z'/></svg>");
+  background-position:center center;
   background-repeat:no-repeat;
-  background-position:right 10px center;
+  background-size:cover;
+  opacity:0; transition: opacity .6s ease;
+  filter: saturate(1.05) brightness(.9);
 }
-.settings-flyout select option{ background:#1e1e24; color:#fff; }
-/* select focus 同步主題色 */
-.settings-flyout select:focus{ border-color:var(--accent); }
+.bg.show{ opacity:1; }
+.bg-next.show{ opacity:1; }
+.bg-dim{ position:absolute; inset:0; background: radial-gradient(transparent, rgba(0,0,0,.45)); pointer-events:none; }
+
+/* 舞台 */
+.stage{ position:relative; display:flex; align-items:center; justify-content:center; padding-top:24px; padding-bottom:160px; }
+#viz{ width: min(100vw, 100vh); height: min(100vw, 100vh); max-width: 1200px; max-height: 1200px; }
+
+/* Now playing */
+.nowplaying{ position:absolute; left:0; right:0; bottom: 110px; padding: 0 20px; }
+.nowplaying .title{ text-align:center; font-size:20px; font-weight:700; text-shadow: 0 2px 6px rgba(0,0,0,.5); }
+.scrub{ display:flex; align-items:center; gap:12px; max-width:800px; margin:10px auto 0; }
+.time{ width:60px; text-align:center; color: var(--muted); }
+.bar-outer{ flex:1; height:8px; background: rgba(255,255,255,.15); border-radius:999px; cursor:pointer; }
+.bar-inner{ height:100%; width:0%; background: linear-gradient(90deg, #a6c0fe, #f68084); border-radius:999px; }
 
 /* 底部控制列 */
-.bar{
-  position:fixed; left:0; right:0; bottom:0; z-index:20;
-  display:grid; grid-template-columns:1fr auto 1fr;
-  align-items:center; padding:10px 20px;
-  backdrop-filter:blur(12px) saturate(1.2); background:rgba(255,255,255,.08);
-  border-top:1px solid rgba(255,255,255,.15);
+.bar{ position:fixed; left:0; right:0; bottom:0; height:72px; display:flex; align-items:center; justify-content:space-between; padding:0 12px; background: rgba(8,10,18,.6); backdrop-filter: blur(10px); border-top:1px solid rgba(255,255,255,.08); }
+.btn{ appearance:none; border:0; background: rgba(255,255,255,.12); color:#fff; padding:10px 14px; border-radius:12px; cursor:pointer; }
+.btn.icon{ font-size:18px; width:44px; height:44px; display:grid; place-items:center; }
+.btn.icon.sm{ width:32px; height:32px; }
+.btn.ghost{ background: transparent; border:1px solid rgba(255,255,255,.2); }
+
+.vol{ display:flex; align-items:center; gap:8px; }
+.vol input[type=range]{ width:120px; }
+
+/* 播放清單抽屜 */
+.playlist-panel{
+  position:fixed; top:0; bottom:0; left:0; width: 320px; transform: translateX(-100%);
+  transition: transform .3s ease; background: rgba(10,12,18,.86); backdrop-filter: blur(10px);
+  border-right:1px solid rgba(255,255,255,.08); padding: 12px;
 }
-.bar-left{ display:flex; align-items:center; justify-content:flex-start; }
-.bar-center{ display:flex; justify-content:center; align-items:center; gap:40px; }
+.playlist-panel.open{ transform: translateX(0); }
+.playlist-header{ display:flex; align-items:center; justify-content:space-between; }
+#playlistItems{ list-style:none; margin:12px 0 0; padding:0; max-height: calc(100vh - 120px); overflow:auto; }
+.pl-item{ margin:6px 0; }
+.pl-item.active{ outline:2px solid var(--accent); border-radius:12px; }
+.pl-btn{ width:100%; text-align:left; padding:10px 12px; border-radius:10px; border:0; background: rgba(255,255,255,.06); color:#fff; }
+.pl-title{ display:block; font-weight:700; }
+.pl-artist{ display:block; font-size:12px; color: var(--muted); }
 
-/* 右側音量 */
-.bar-right{ display:flex; justify-content:flex-end; align-items:center; gap:12px; }
-.vol{ display:flex; align-items:center; gap:6px; }
-.vol input{ width:120px; }
-
-/* 視覺化不負責拖曳 */
-canvas{ cursor:default; }
-
-/* 確保下載 SVG 與其他圖示高度一致 */
-.icon-download {
-  width: 37px;
-  height: 26px;
-  display: block;
+/* 設定浮窗 */
+.settings-flyout{
+  position:fixed; right:12px; bottom:88px; width:320px; max-width:calc(100vw - 24px);
+  background: rgba(10,12,18,.86); backdrop-filter: blur(10px);
+  border:1px solid rgba(255,255,255,.08); border-radius:14px; padding: 10px 12px;
+  transform: translateY(20px); opacity:0; pointer-events:none; transition: .2s ease;
 }
+.settings-flyout.open{ transform: translateY(0); opacity:1; pointer-events:auto; }
+.settings-header{ display:flex; align-items:center; justify-content:space-between; margin-bottom:8px; }
+.settings-body .row{ display:flex; align-items:center; justify-content:space-between; margin:8px 0; }
+.settings-body .sub{ color: var(--muted); font-size:12px; }
+.settings-body .input{ min-width: 160px; }
 
-/* === Mobile：底部全擺 + 按鈕縮小 === */
-@media (max-width: 768px) {
-  /* 底部列更緊湊 */
-  .bar{
-    grid-template-columns: auto 1fr auto;
-    padding: 6px 10px;
-    gap: 6px;
-    padding-bottom: calc(6px + env(safe-area-inset-bottom));
-  }
-  .bar-center{ gap: 12px; }
-  .bar-right{ gap: 8px; }
-
-  /* 統一縮小為 44x44 的圓形按鈕 */
-  .btn.icon{
-    width: 44px;
-    height: 44px;
-    border-radius: 50%;
-    font-size: 20px;  /* 文字/emoji 按鈕的字級 */
-    padding: 0;
-  }
-
-  /* 下載鈕回到底部列，覆蓋任何之前的固定定位 */
-  #dlBgBtn{
-    position: static !important;
-    top: auto !important; right: auto !important; left: auto !important; bottom: auto !important;
-    width: 44px; height: 44px;
-    border-radius: 50%;
-    backdrop-filter: none;
-    background: transparent;  /* 跟其他按鈕一致 */
-    box-shadow: none;
-  }
-  #dlBgBtn .icon-download{
-    width: 22px;
-    height: 22px;
-    display: block;
-    margin: 0 auto;
-  }
-
-  /* 手機用側鍵控音量 → 隱藏整組音量 UI */
-  .vol{ display: none !important; }
-
-  /* 減少中間控制鈕間距，讓三顆能穩穩擺下 */
-  .bar-center .btn.icon{ width:44px; height:44px; font-size:20px; }
-
-  /* 進度/標題區留一點空間即可 */
-  .stage{ padding-top: 5vh; }
+.switch{ position:relative; display:inline-block; width:44px; height:24px; }
+.switch input{ display:none; }
+.switch .slider{ position:absolute; inset:0; background:#777; border-radius:999px; transition:.2s; }
+.switch .slider:before{
+  content:""; position:absolute; left:3px; top:3px; width:18px; height:18px; background:#fff; border-radius:50%; transition:.2s;
 }
+.switch input:checked + .slider{ background:#4caf50; }
+.switch input:checked + .slider:before{ transform: translateX(20px); }
 
+/* 手機優化 */
+@media (max-width: 600px){
+  #viz{ width: 100vw; height: 100vw; }
+  .nowplaying{ bottom: 120px; }
+  .vol input[type=range]{ width: 90px; }
+}

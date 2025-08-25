@@ -6,34 +6,34 @@
     "bgTag": "hakurei_reimu_(pc-98)"
   },
   "/Touhou-music-generator/music/th02/11.Complete%20Darkness.mp3": {
-    "bgTag": "hakurei_reimu"
+    "bgTag": "mima_(touhou)"
   },
   "/Touhou-music-generator/music/th03/15.Strawberry%20Crisis!!.mp3": {
     "bgTag": "okazaki_yumemi"
   },
   "/Touhou-music-generator/music/th03/3.%E6%9D%B1%E6%96%B9%E5%A6%96%E6%81%8B%E8%AB%87.mp3": {
-    "bgTag": "hakurei_reimu"
+    "bgTag": "hakurei_reimu_(pc-98)"
   },
   "/Touhou-music-generator/music/th03/4.Reincarnation.mp3": {
-    "bgTag": "hakurei_reimu"
+    "bgTag": "mima_(touhou)"
   },
   "/Touhou-music-generator/music/th03/6.Tabula%20rasa%E3%80%80%EF%BD%9E%20%E7%A9%BA%E7%99%BD%E5%B0%91%E5%A5%B3.mp3": {
     "bgTag": "ellen_(touhou)"
   },
   "/Touhou-music-generator/music/th03/8.%E5%A4%A2%E6%B6%88%E5%A4%B1%E3%80%80%EF%BD%9E%20Lost%20Dream.mp3": {
-    "bgTag": "hakurei_reimu"
+    "bgTag": "kana_anaberal"
   },
   "/Touhou-music-generator/music/th04/13.%E7%9C%A0%E3%82%8C%E3%82%8B%E6%81%90%E6%80%96%E3%80%80%EF%BD%9E%E3%80%80Sleeping%20Terror.mp3": {
     "bgTag": "kazami_yuuka_(pc-98)"
   },
   "/Touhou-music-generator/music/th04/15.%E5%B9%BD%E5%A4%A2%E3%80%80%EF%BD%9E%E3%80%80Inanimate%20Dream.mp3": {
-    "bgTag": "hakurei_reimu"
+    "bgTag": "kazami_yuuka_(pc-98)"
   },
   "/Touhou-music-generator/music/th04/18.%E3%81%8B%E3%82%8F%E3%81%84%E3%81%84%E6%82%AA%E9%AD%94%E3%80%80~%E3%80%80Innocence.mp3": {
-    "bgTag": "hakurei_reimu"
+    "bgTag": "gengetsu_(touhou)"
   },
   "/Touhou-music-generator/music/th04/30.%E5%B9%BD%E5%A4%A2%E3%80%80%EF%BD%9E%E3%80%80Inanimate%20Dream%20(%E6%9C%AA%E4%BD%BF%E7%94%A8%E3%83%90%E3%83%BC%E3%82%B8%E3%83%A7%E3%83%B3).mp3": {
-    "bgTag": "hakurei_reimu"
+    "bgTag": "kazami_yuuka_(pc-98)"
   },
   "/Touhou-music-generator/music/th04/7.Bad%20Apple!!.mp3": {
     "bgTag": "elly_(touhou)"
@@ -42,10 +42,10 @@
     "bgTag": "alice_margatroid"
   },
   "/Touhou-music-generator/music/th05/15.%E7%A5%9E%E8%A9%B1%E5%B9%BB%E6%83%B3%20%EF%BD%9E%20Infinite%20Being.mp3": {
-    "bgTag": "alice_margatroid_(pc-98)"
+    "bgTag": "shinki_(touhou)"
   },
   "/Touhou-music-generator/music/th05/16.%E4%B8%8D%E6%80%9D%E8%AD%B0%E3%81%AE%E5%9B%BD%E3%81%AE%E3%82%A2%E3%83%AA%E3%82%B9.mp3": {
-    "bgTag": "hakurei_reimu"
+    "bgTag": "alice_margatroid_(pc-98)"
   },
   "/Touhou-music-generator/music/th05/17.the%20Grimoire%20of%20Alice.mp3": {
     "bgTag": "alice_margatroid_(pc-98)"
@@ -54,7 +54,7 @@
     "bgTag": "alice_margatroid_(pc-98)"
   },
   "/Touhou-music-generator/music/th05/7.%E3%83%97%E3%83%A9%E3%82%B9%E3%83%81%E3%83%83%E3%82%AF%E3%83%9E%E3%82%A4%E3%83%B3%E3%83%89.mp3": {
-    "bgTag": "touhou"
+    "bgTag": "alice_margatroid_(pc-98)"
   },
   "/Touhou-music-generator/music/th06/01.%20%E8%B5%A4%E3%82%88%E3%82%8A%E7%B4%85%E3%81%84%E5%A4%A2.mp3": {
     "bgTag": "remilia_scarlet"
@@ -66,7 +66,7 @@
     "bgTag": "rumia"
   },
   "/Touhou-music-generator/music/th06/04.%20%E3%83%AB%E3%83%BC%E3%83%8D%E3%82%A4%E3%83%88%E3%82%A8%E3%83%AB%E3%83%95.mp3": {
-    "bgTag": "touhou"
+    "bgTag": "cirno"
   },
   "/Touhou-music-generator/music/th06/05.%20%E3%81%8A%E3%81%A6%E3%82%93%E3%81%B0%E6%81%8B%E5%A8%98.mp3": {
     "bgTag": "cirno"
@@ -75,7 +75,7 @@
     "bgTag": "hong_meiling"
   },
   "/Touhou-music-generator/music/th06/07.%20%E6%98%8E%E6%B2%BB%E5%8D%81%E4%B8%83%E5%B9%B4%E3%81%AE%E4%B8%8A%E6%B5%B7%E3%82%A2%E3%83%AA%E3%82%B9.mp3": {
-    "bgTag": "touhou"
+    "bgTag": "hong_meiling"
   },
   "/Touhou-music-generator/music/th06/08.%20%E3%83%B4%E3%83%AF%E3%83%AB%E9%AD%94%E6%B3%95%E5%9B%B3%E6%9B%B8%E9%A4%A8.mp3": {
     "bgTag": "patchouli_knowledge"
@@ -90,13 +90,13 @@
     "bgTag": "izayoi_sakuya"
   },
   "/Touhou-music-generator/music/th06/12.%20%E3%83%84%E3%82%A7%E3%83%9A%E3%82%B7%E3%83%A5%E3%81%AE%E5%B9%BC%E3%81%8D%E6%9C%AB%E8%A3%94.mp3": {
-    "bgTag": "touhou"
+    "bgTag": "remilia_scarlet"
   },
   "/Touhou-music-generator/music/th06/13.%20%E4%BA%A1%E3%81%8D%E7%8E%8B%E5%A5%B3%E3%81%AE%E7%82%BA%E3%81%AE%E3%82%BB%E3%83%97%E3%83%86%E3%83%83%E3%83%88.mp3": {
     "bgTag": "remilia_scarlet"
   },
   "/Touhou-music-generator/music/th06/14.%20%E9%AD%94%E6%B3%95%E5%B0%91%E5%A5%B3%E9%81%94%E3%81%AE%E7%99%BE%E5%B9%B4%E7%A5%AD.mp3": {
-    "bgTag": "kirisame_marisa"
+    "bgTag": "flandre_scarlet"
   },
   "/Touhou-music-generator/music/th06/15.%20U.N.%E3%82%AA%E3%83%BC%E3%82%A8%E3%83%B3%E3%81%AF%E5%BD%BC%E5%A5%B3%E3%81%AA%E3%81%AE%E3%81%8B%EF%BC%9F.mp3": {
     "bgTag": "flandre_scarlet"
@@ -108,7 +108,7 @@
     "bgTag": "remilia_scarlet"
   },
   "/Touhou-music-generator/music/th07/01.%20%E5%A6%96%E3%80%85%E5%A4%A2%E3%80%80%EF%BD%9E%20Snow%20or%20Cherry%20Petal.mp3": {
-    "bgTag": "touhou"
+    "bgTag": "saigyouji_yuyuko"
   },
   "/Touhou-music-generator/music/th07/02.%20%E7%84%A1%E4%BD%95%E6%9C%89%E3%81%AE%E9%83%B7%E3%80%80%EF%BD%9E%20Deep%20Mountain.mp3": {
     "bgTag": "letty_whiterock"
@@ -129,16 +129,16 @@
     "bgTag": "alice_margatroid"
   },
   "/Touhou-music-generator/music/th07/08.%20%E5%A4%A9%E7%A9%BA%E3%81%AE%E8%8A%B1%E3%81%AE%E9%83%BD.mp3": {
-    "bgTag": "touhou"
+    "bgTag": "prismriver_sisters"
   },
   "/Touhou-music-generator/music/th07/09.%20%E5%B9%BD%E9%9C%8A%E6%A5%BD%E5%9B%A3%E3%80%80%EF%BD%9E%20Phantom%20Ensemble.mp3": {
     "bgTag": "prismriver_sisters"
   },
   "/Touhou-music-generator/music/th07/10.%20%E6%9D%B1%E6%96%B9%E5%A6%96%E3%80%85%E5%A4%A2%E3%80%80%EF%BD%9E%20Ancient%20Temple.mp3": {
-    "bgTag": "saigyouji_yuyuko"
+    "bgTag": "konpaku_youmu"
   },
   "/Touhou-music-generator/music/th07/11.%20%E5%BA%83%E6%9C%89%E5%B0%84%E6%80%AA%E9%B3%A5%E4%BA%8B%E3%80%80%EF%BD%9E%20Till%20When%EF%BC%9F.mp3": {
-    "bgTag": "touhou"
+    "bgTag": "konpaku_youmu"
   },
   "/Touhou-music-generator/music/th07/12.%20%E3%82%A2%E3%83%AB%E3%83%86%E3%82%A3%E3%83%A1%E3%83%83%E3%83%88%E3%83%88%E3%82%A5%E3%83%AB%E3%83%BC%E3%82%B9.mp3": {
     "bgTag": "saigyouji_yuyuko"
@@ -150,19 +150,19 @@
     "bgTag": "saigyouji_yuyuko"
   },
   "/Touhou-music-generator/music/th07/15.%20%E5%A6%96%E3%80%85%E8%B7%8B%E6%89%88.mp3": {
-    "bgTag": "touhou"
+    "bgTag": "yakumo_ran"
   },
   "/Touhou-music-generator/music/th07/16.%20%E5%B0%91%E5%A5%B3%E5%B9%BB%E8%91%AC%E3%80%80%EF%BD%9E%20Necro-Fantasy.mp3": {
     "bgTag": "yakumo_ran"
   },
   "/Touhou-music-generator/music/th07/17.%20%E5%A6%96%E3%80%85%E8%B7%8B%E6%89%88%E3%80%80%EF%BD%9E%20Who%20done%20it!.mp3": {
-    "bgTag": "touhou"
+    "bgTag": "yakumo_yukari"
   },
   "/Touhou-music-generator/music/th07/18.%20%E3%83%8D%E3%82%AF%E3%83%AD%E3%83%95%E3%82%A1%E3%83%B3%E3%82%BF%E3%82%B8%E3%82%A2.mp3": {
     "bgTag": "yakumo_yukari"
   },
   "/Touhou-music-generator/music/th07/20.%20%E3%81%95%E3%81%8F%E3%82%89%E3%81%95%E3%81%8F%E3%82%89%E3%80%80%EF%BD%9E%20Japanize%20Dream....mp3": {
-    "bgTag": "touhou"
+    "bgTag": "saigyouji_yuyuko"
   },
   "/Touhou-music-generator/music/th07.5/01.%20%E8%90%83%E5%A4%A2%E6%83%B3.mp3": {
     "bgTag": "touhou"

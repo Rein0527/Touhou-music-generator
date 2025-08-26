@@ -165,7 +165,7 @@
     "bgTag": "saigyouji_yuyuko"
   },
   "/Touhou-music-generator/music/th07.5/01.%20%E8%90%83%E5%A4%A2%E6%83%B3.mp3": {
-    "bgTag": "touhou"
+    "bgTag": "ibuki_suika"
   },
   "/Touhou-music-generator/music/th07.5/02.%20%E6%9D%B1%E6%96%B9%E5%A6%96%E6%81%8B%E8%AB%87.mp3": {
     "bgTag": "hakurei_reimu"
@@ -174,13 +174,13 @@
     "bgTag": "hakurei_reimu"
   },
   "/Touhou-music-generator/music/th07.5/04.%20%E6%81%8B%E8%89%B2%E3%83%9E%E3%82%B8%E3%83%83%E3%82%AF.mp3": {
-    "bgTag": "touhou"
+    "bgTag": "kirisame_marisa"
   },
   "/Touhou-music-generator/music/th07.5/05.%20%E9%AD%94%E5%A5%B3%E9%81%94%E3%81%AE%E8%88%9E%E8%B8%8F%E4%BC%9A.mp3": {
-    "bgTag": "touhou"
+    "bgTag": "kirisame_marisa"
   },
   "/Touhou-music-generator/music/th07.5/06.%20%E3%83%A1%E3%82%A4%E3%83%89%E3%81%A8%E8%A1%80%E3%81%A8%E6%87%90%E4%B8%AD%E6%99%82%E8%A8%88.mp3": {
-    "bgTag": "touhou"
+    "bgTag": "izayoi_sakuya"
   },
   "/Touhou-music-generator/music/th07.5/07.%20%E6%9C%88%E6%99%82%E8%A8%88%20~%20%E3%83%AB%E3%83%8A%E3%83%BB%E3%83%80%E3%82%A4%E3%82%A2%E3%83%AB.mp3": {
     "bgTag": "izayoi_sakuya"
@@ -198,34 +198,34 @@
     "bgTag": "patchouli_knowledge"
   },
   "/Touhou-music-generator/music/th07.5/12.%20%E5%BA%83%E6%9C%89%E5%B0%84%E6%80%AA%E9%B3%A5%E4%BA%8B%20~%20Till%20When%20.mp3": {
-    "bgTag": "touhou"
+    "bgTag": "konpaku_youmu"
   },
   "/Touhou-music-generator/music/th07.5/13.%20%E6%9D%B1%E6%96%B9%E5%A6%96%E3%80%85%E5%A4%A2%20~%20Ancient%20Temple.mp3": {
-    "bgTag": "saigyouji_yuyuko"
+    "bgTag": "konpaku_youmu"
   },
   "/Touhou-music-generator/music/th07.5/14.%20%E4%BA%A1%E3%81%8D%E7%8E%8B%E5%A5%B3%E3%81%AE%E7%82%BA%E3%81%AE%E3%82%BB%E3%83%97%E3%83%86%E3%83%83%E3%83%88.mp3": {
     "bgTag": "remilia_scarlet"
   },
   "/Touhou-music-generator/music/th07.5/15.%20%E5%B9%BD%E9%9B%85%E3%81%AB%E5%92%B2%E3%81%8B%E3%81%9B%E3%80%81%E9%BB%92%E6%9F%93%E3%81%AE%E6%A1%9C%20~%20Border%20of%20Life..mp3": {
-    "bgTag": "touhou"
+    "bgTag": "saigyouji_yuyuko"
   },
   "/Touhou-music-generator/music/th07.5/16.%20Demystify%20Feast.mp3": {
-    "bgTag": "touhou"
+    "bgTag": "ibuki_suika"
   },
   "/Touhou-music-generator/music/th07.5/17.%20%E5%A4%9C%E3%81%8C%E9%99%8D%E3%82%8A%E3%81%A6%E3%81%8F%E3%82%8B%20~%20Evening%20Star.mp3": {
-    "bgTag": "touhou"
+    "bgTag": "yakumo_yukari"
   },
   "/Touhou-music-generator/music/th07.5/18.%20%E5%BE%A1%E4%BC%BD%E3%81%AE%E5%9B%BD%E3%81%AE%E9%AC%BC%E3%81%8C%E5%B3%B6.mp3": {
-    "bgTag": "touhou"
+    "bgTag": "ibuki_suika"
   },
   "/Touhou-music-generator/music/th07.5/19.%20%E6%9D%B1%E6%96%B9%E8%90%83%E5%A4%A2%E6%83%B3.mp3": {
-    "bgTag": "touhou"
+    "bgTag": "ibuki_suika"
   },
   "/Touhou-music-generator/music/th07.5/20.%20%E6%9D%B1%E6%96%B9%E8%90%83%E5%A4%A2%E6%83%B3%20(Arrange).mp3": {
-    "bgTag": "touhou"
+    "bgTag": "ibuki_suika"
   },
   "/Touhou-music-generator/music/th07.5/34.%20%E7%A0%95%E6%9C%88.mp3": {
-    "bgTag": "touhou"
+    "bgTag": "ibuki_suika"
   },
   "/Touhou-music-generator/music/th08/01.%20%E6%B0%B8%E5%A4%9C%E6%8A%84%E3%80%80%EF%BD%9E%20Eastern%20Night.mp3": {
     "bgTag": "touhou"

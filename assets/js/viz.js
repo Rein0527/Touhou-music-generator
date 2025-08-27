@@ -1,14 +1,14 @@
 // 中央波動（七彩可變+半透明）+ 彩虹等化條（不透明）+ 同心波紋（半透明，可跟隨中心色）
-// + 外圈光暈（不透明）+ 圓弧進度（加強版）+ 鼓點偵測
+// + 外圈光暈（不透明）+ 圓弧進度（加強版）+ 鼓點偵測 + 自動效能調整(QoS: 不影響外圈等化條密度)
 const audio  = document.getElementById("audio");
 const canvas = document.getElementById("viz");
 const ctx    = canvas.getContext("2d");
 
 // —— 可調參數 —— //
 const CFG = {
-  // 外圈等化條
-  bins: 96,
-  smoothing: 0.82,
+  // 外圈等化條（密度固定，不隨 QoS）
+  bins: 108,
+  smoothing: 0.76,
   bassBoost: 1.8,
   barBase: 26,
   barGain: 190,
@@ -20,7 +20,7 @@ const CFG = {
   centerGain: 80,
   centerBassGain: 120,
   centerGlow: 140,
-  wavePoints: 256,
+  wavePoints: 256,         // 只有中心波動會隨 QoS 調整解析度
   waveSmooth: 0.22,
 
   // —— 中心七彩設定 —— //
@@ -36,15 +36,38 @@ const CFG = {
   rippleAmp: 60,
   rippleSpeed: 2.2,
   rippleGap: 30,
-  rippleAlpha: 0.75,
-
-  // 外圈光暈
-  glowScale: 110,
+  rippleAlpha: 0.85,
 
   // —— 透明度控制（只作用在中心球與波紋） —— //
-  alphaCenter: 0.6,   // 中心球
-  alphaRipples: 0.85, // 波紋
+  alphaCenter: 0.35,   // 中心球
+  alphaRipples: 0.85,  // 波紋
 };
+
+// —— 效能自動調整（Auto QoS）—— //
+// 注意：QoS 只影響中心波動解析度、DPR 實體像素、陰影上限；不影響外圈等化條的 bins。
+const QoS = {
+  minFps: 50,          // 低於此幀數就降畫質
+  maxFps: 58,          // 高於此幀數就升畫質
+  scale: 1.0,          // 畫質倍率（0.70~1.20）
+  minScale: 0.70,
+  maxScale: 1.20,
+  baseWavePts: CFG.wavePoints,
+  // 陰影開銷上限（避免過大 shadowBlur）
+  maxShadowBlur: 24
+};
+let __fps_t = 0, __fps_frames = 0, __fps_val = 60;
+function trackFPS(now){
+  if (!__fps_t) __fps_t = now;
+  __fps_frames++;
+  const dt = now - __fps_t;
+  if (dt >= 500){ // 每 0.5 秒估一次
+    __fps_val = (__fps_frames * 1000) / dt;
+    __fps_frames = 0;
+    __fps_t = now;
+    if (__fps_val < QoS.minFps) QoS.scale = Math.max(QoS.minScale, QoS.scale - 0.05);
+    else if (__fps_val > QoS.maxFps) QoS.scale = Math.min(QoS.maxScale, QoS.scale + 0.05);
+  }
+}
 
 // —— 鼓點強化參數 —— //
 const KICK = {
@@ -81,6 +104,18 @@ let kickEnv = 0;
 let bassMeanLT = 0;
 let lastKickT = 0;
 
+// 角度查表（降低 trig 開銷；bins 固定依 CFG.bins 建立）
+let __angleLUT = null;
+function ensureAngleLUT(bins) {
+  if (!__angleLUT || __angleLUT.length !== bins) {
+    __angleLUT = new Array(bins);
+    for (let i = 0; i < bins; i++) {
+      const a = (i / bins) * Math.PI * 2;
+      __angleLUT[i] = { c: Math.cos(a), s: Math.sin(a) };
+    }
+  }
+}
+
 function ensureAudioGraph() {
   if (audioCtx) return;
   audioCtx = new (window.AudioContext || window.webkitAudioContext)();
@@ -95,10 +130,17 @@ function ensureAudioGraph() {
   dataFreq = new Uint8Array(analyser.frequencyBinCount);
   dataTime = new Uint8Array(analyser.frequencyBinCount);
 
-  const dpr = Math.max(1, Math.min(2, window.devicePixelRatio || 1));
-  canvas.width  = Math.floor(canvas.width  * dpr);
-  canvas.height = Math.floor(canvas.height * dpr);
-  ctx.scale(dpr, dpr);
+  // 限制 DPR 並乘上 QoS.scale（不影響 bins）
+  const rawDpr = window.devicePixelRatio || 1;
+  const dpr = Math.max(1, Math.min(1.6, rawDpr)); // 將超高 DPR 限到 1.6
+  const scale = dpr * QoS.scale;
+
+  // 注意：index.html 已把 canvas 設 CSS 尺寸為 1200x1200（寬高屬性）
+  const cssW = canvas.width;
+  const cssH = canvas.height;
+  canvas.width  = Math.floor(cssW * scale);
+  canvas.height = Math.floor(cssH * scale);
+  ctx.setTransform(scale, 0, 0, scale, 0, 0);
 }
 
 function computeLevels(arr) {
@@ -127,12 +169,20 @@ function smoothArray(a, k = 0.2) {
 function lerp(a, b, t) { return a + (b - a) * t; }
 
 function draw(now = 0) {
+  trackFPS(now);
+
   const W = canvas.width, H = canvas.height;
   const cx = W / 2, cy = H / 2;
   const short = Math.min(W, H);
   const radius = short * CFG.ringRadiusRatio;
   const ring = radius + CFG.ringOffset;
+
+  // —— 這裡 bins 固定，不隨 QoS —— //
   const bins = CFG.bins;
+  ensureAngleLUT(bins);
+
+  // 中心波動解析度仍隨 QoS 調整
+  const N = Math.max(120, Math.round(QoS.baseWavePts * QoS.scale));
 
   const dt = lastT ? (now - lastT) / 1000 : 0;
   lastT = now;
@@ -191,11 +241,11 @@ function draw(now = 0) {
     const gain = CFG.centerGain * (beat + KICK.gainMul * kickEnv);
     const bassPush = CFG.centerBassGain * (0.55 * bass + 0.45 * bassPeak) + (KICK.push * kickEnv);
 
-    const N = CFG.wavePoints;
     const step = sm.length / N;
 
-    // 決定中心色
-    const hue = CFG.centerRainbow ? (huePhase + CFG.centerHueBassSwing * bassPeak) % 360 : 210;
+	// 決定中心色：取同心波紋色相 huePhase 的反色（+180°）
+	const baseHue = CFG.centerRainbow ? (huePhase + CFG.centerHueBassSwing * bassPeak) % 360 : 210;
+	const hue = (baseHue + 180) % 360;
     const centerStroke = `hsl(${hue}, ${CFG.centerSat}%, ${CFG.centerLight + 5}%)`;
     const centerFill   = `hsla(${hue}, ${CFG.centerSat}%, ${CFG.centerLight}%, 0.85)`;
     const centerGlow   = `hsl(${hue}, ${CFG.centerSat}%, ${Math.min(70, CFG.centerLight + 15)}%)`;
@@ -204,9 +254,12 @@ function draw(now = 0) {
     ctx.globalCompositeOperation = "lighter";
     ctx.globalAlpha = CFG.alphaCenter;
 
-    // 鼓點時光暈更亮
+    // 鼓點時光暈更亮（加上上限）
     ctx.shadowColor = centerGlow;
-    ctx.shadowBlur = (CFG.centerGlow * (0.5 + volEnv)) * (1 + KICK.glowBoost * kickEnv * 0.5);
+    ctx.shadowBlur = Math.min(
+      (CFG.centerGlow * (0.5 + volEnv)) * (1 + KICK.glowBoost * kickEnv * 0.5),
+      QoS.maxShadowBlur
+    );
 
     // 漸層（中心白 → 主色 → 透明）
     const grad = ctx.createRadialGradient(cx, cy, base * 0.18, cx, cy, base + gain + bassPush + 20);
@@ -228,9 +281,9 @@ function draw(now = 0) {
     ctx.closePath();
     ctx.fill();
 
-    // 外緣描邊：用同色
+    // 外緣描邊：用同色（線寬下修以省資源）
     ctx.strokeStyle = centerStroke;
-    ctx.lineWidth = 3.2 + volEnv * 2.4;
+    ctx.lineWidth = 2.4 + volEnv * 1.8;   // 原：3.2 + volEnv * 2.4
     ctx.stroke();
     ctx.restore();
   })();
@@ -262,7 +315,7 @@ function draw(now = 0) {
     ctx.restore();
   })();
 
-  // —— 彩虹等化條（不透明） —— //
+  // —— 彩虹等化條（不透明；bins 固定） —— //
   (function drawBars() {
     const step = Math.floor(dataFreq.length / bins) || 1;
     ctx.save();
@@ -275,42 +328,24 @@ function draw(now = 0) {
       const boosted = Math.min(1, v * lowWeight);
       const bar = CFG.barBase + boosted * CFG.barGain;
 
-      const a = (i / bins) * Math.PI * 2;
-      const x1 = cx + Math.cos(a) * radius, y1 = cy + Math.sin(a) * radius;
-      const x2 = cx + Math.cos(a) * (radius + bar), y2 = cy + Math.sin(a) * (radius + bar);
+      const ang = __angleLUT[i];
+      const x1 = cx + ang.c * radius,           y1 = cy + ang.s * radius;
+      const x2 = cx + ang.c * (radius + bar),   y2 = cy + ang.s * (radius + bar);
 
       const hue = (i / bins) * 360;
       const light = 44 + boosted * 42;
       const color = `hsl(${hue}, 100%, ${light}%)`;
 
       ctx.strokeStyle = color;
-      ctx.lineWidth = 3.8;
+      ctx.lineWidth = 3.0; // 原：3.8
       ctx.shadowColor = color;
-      ctx.shadowBlur = 6 + boosted * 30;
+      ctx.shadowBlur = Math.min(6 + boosted * 30, QoS.maxShadowBlur);
 
       ctx.beginPath();
       ctx.moveTo(x1, y1);
       ctx.lineTo(x2, y2);
       ctx.stroke();
     }
-    ctx.restore();
-  })();
-
-  // —— 外圈光暈（不透明） —— //
-  (function drawOuterGlow() {
-    const glow = 10 + (0.6 * volEnv + 0.9 * bassPeak) * CFG.glowScale;
-    ctx.save();
-    ctx.globalCompositeOperation = "lighter";
-    ctx.globalAlpha = 1;
-    const accent = ACCENT;
-    ctx.strokeStyle = accent;
-    ctx.lineWidth = 13;
-    ctx.lineCap = "round";
-    ctx.shadowBlur = glow * 1.35;
-    ctx.shadowColor = accent;
-    ctx.beginPath();
-    ctx.arc(cx, cy, ring + 18, 0, Math.PI * 2);
-    ctx.stroke();
     ctx.restore();
   })();
 
@@ -332,10 +367,10 @@ function draw(now = 0) {
     ctx.save();
     const accent2 = ACCENT;
     ctx.strokeStyle = accent2;
-    ctx.lineWidth = 15;
+    ctx.lineWidth = 12; // 原：15
     ctx.lineCap = "round";
     ctx.shadowColor = accent2;
-    ctx.shadowBlur = 25;
+    ctx.shadowBlur = Math.min(25, QoS.maxShadowBlur);
     ctx.globalAlpha = 0.95;
     ctx.beginPath();
     ctx.arc(cx, cy, ring, s, e, false);

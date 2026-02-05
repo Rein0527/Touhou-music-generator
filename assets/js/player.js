@@ -27,7 +27,8 @@ const audio = document.getElementById("audio");
 function detectBasePath() {
   const p = window.location.pathname;
   const base = p.replace(/index\.html$/,'');
-  return base.endsWith('/') ? base : base + বিব '/';
+  // ✅ FIX: 不要有任何奇怪字元，保證是 base + '/'
+  return base.endsWith('/') ? base : base + '/';
 }
 const PAGE_BASE = detectBasePath();
 

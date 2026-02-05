@@ -4,6 +4,30 @@ const audio  = document.getElementById("audio");
 const canvas = document.getElementById("viz");
 const ctx    = canvas.getContext("2d");
 
+// ✅ 視覺化開關（由右下設定控制，預設關閉）
+export let VIZ_ENABLED = false;
+export function setVizEnabled(v) {
+  VIZ_ENABLED = !!v;
+
+  if (!VIZ_ENABLED) {
+    if (rafId) cancelAnimationFrame(rafId);
+    rafId = null;
+    // 清畫面
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    return;
+  }
+
+  // 開啟：若正在播放，立即啟動
+  if (!audio.paused && !audio.ended) {
+    ensureAudioGraph();
+    if (audioCtx && audioCtx.state === "suspended") audioCtx.resume();
+    if (rafId) cancelAnimationFrame(rafId);
+    lastT = 0;
+    draw();
+  }
+}
+export function getVizEnabled() { return VIZ_ENABLED; }
+
 // —— 可調參數 —— //
 const CFG = {
   // 外圈等化條（密度固定，不隨 QoS）
@@ -116,6 +140,29 @@ function ensureAngleLUT(bins) {
   }
 }
 
+// ✅ 用 CSS 實際顯示尺寸當邏輯座標（修手機置中）
+let __cssW = 0, __cssH = 0;
+function resizeCanvasToDisplaySize() {
+  const rect = canvas.getBoundingClientRect();
+  const cssW = Math.max(1, Math.round(rect.width));
+  const cssH = Math.max(1, Math.round(rect.height));
+  __cssW = cssW; __cssH = cssH;
+
+  const rawDpr = window.devicePixelRatio || 1;
+  const dpr = Math.max(1, Math.min(1.6, rawDpr));
+  const scale = dpr * QoS.scale;
+
+  const needW = Math.floor(cssW * scale);
+  const needH = Math.floor(cssH * scale);
+
+  if (canvas.width !== needW || canvas.height !== needH) {
+    canvas.width = needW;
+    canvas.height = needH;
+  }
+  // 之後 draw 都用「CSS 邏輯座標」在畫（ctx 已經縮放好了）
+  ctx.setTransform(scale, 0, 0, scale, 0, 0);
+}
+
 function ensureAudioGraph() {
   if (audioCtx) return;
   audioCtx = new (window.AudioContext || window.webkitAudioContext)();
@@ -130,17 +177,7 @@ function ensureAudioGraph() {
   dataFreq = new Uint8Array(analyser.frequencyBinCount);
   dataTime = new Uint8Array(analyser.frequencyBinCount);
 
-  // 限制 DPR 並乘上 QoS.scale（不影響 bins）
-  const rawDpr = window.devicePixelRatio || 1;
-  const dpr = Math.max(1, Math.min(1.6, rawDpr)); // 將超高 DPR 限到 1.6
-  const scale = dpr * QoS.scale;
-
-  // 注意：index.html 已把 canvas 設 CSS 尺寸為 1200x1200（寬高屬性）
-  const cssW = canvas.width;
-  const cssH = canvas.height;
-  canvas.width  = Math.floor(cssW * scale);
-  canvas.height = Math.floor(cssH * scale);
-  ctx.setTransform(scale, 0, 0, scale, 0, 0);
+  resizeCanvasToDisplaySize();
 }
 
 function computeLevels(arr) {
@@ -169,9 +206,17 @@ function smoothArray(a, k = 0.2) {
 function lerp(a, b, t) { return a + (b - a) * t; }
 
 function draw(now = 0) {
+  if (!VIZ_ENABLED) return;
+
   trackFPS(now);
 
-  const W = canvas.width, H = canvas.height;
+  // ✅ 用 CSS 邏輯尺寸，不用 canvas.width/height（那是實體像素）
+  const W = __cssW || Math.round(canvas.getBoundingClientRect().width) || 1;
+  const H = __cssH || Math.round(canvas.getBoundingClientRect().height) || 1;
+
+  // QoS.scale 可能會變 → 每幀順便校正 transform（很便宜）
+  resizeCanvasToDisplaySize();
+
   const cx = W / 2, cy = H / 2;
   const short = Math.min(W, H);
   const radius = short * CFG.ringRadiusRatio;
@@ -243,9 +288,9 @@ function draw(now = 0) {
 
     const step = sm.length / N;
 
-	// 決定中心色：取同心波紋色相 huePhase 的反色（+180°）
-	const baseHue = CFG.centerRainbow ? (huePhase + CFG.centerHueBassSwing * bassPeak) % 360 : 210;
-	const hue = (baseHue + 180) % 360;
+    // 決定中心色：取同心波紋色相 huePhase 的反色（+180°）
+    const baseHue = CFG.centerRainbow ? (huePhase + CFG.centerHueBassSwing * bassPeak) % 360 : 210;
+    const hue = (baseHue + 180) % 360;
     const centerStroke = `hsl(${hue}, ${CFG.centerSat}%, ${CFG.centerLight + 5}%)`;
     const centerFill   = `hsla(${hue}, ${CFG.centerSat}%, ${CFG.centerLight}%, 0.85)`;
     const centerGlow   = `hsl(${hue}, ${CFG.centerSat}%, ${Math.min(70, CFG.centerLight + 15)}%)`;
@@ -283,7 +328,7 @@ function draw(now = 0) {
 
     // 外緣描邊：用同色（線寬下修以省資源）
     ctx.strokeStyle = centerStroke;
-    ctx.lineWidth = 2.4 + volEnv * 1.8;   // 原：3.2 + volEnv * 2.4
+    ctx.lineWidth = 2.4 + volEnv * 1.8;
     ctx.stroke();
     ctx.restore();
   })();
@@ -337,7 +382,7 @@ function draw(now = 0) {
       const color = `hsl(${hue}, 100%, ${light}%)`;
 
       ctx.strokeStyle = color;
-      ctx.lineWidth = 3.0; // 原：3.8
+      ctx.lineWidth = 3.0;
       ctx.shadowColor = color;
       ctx.shadowBlur = Math.min(6 + boosted * 30, QoS.maxShadowBlur);
 
@@ -367,7 +412,7 @@ function draw(now = 0) {
     ctx.save();
     const accent2 = ACCENT;
     ctx.strokeStyle = accent2;
-    ctx.lineWidth = 12; // 原：15
+    ctx.lineWidth = 12;
     ctx.lineCap = "round";
     ctx.shadowColor = accent2;
     ctx.shadowBlur = Math.min(25, QoS.maxShadowBlur);
@@ -394,9 +439,16 @@ function hexToRgba(c, a = 1) {
   return s;
 }
 
+// ✅ 手機旋轉/網址列收合會改變 rect，resize 需要跟著更新
+window.addEventListener("resize", () => {
+  if (audioCtx) resizeCanvasToDisplaySize();
+}, { passive: true });
+
 // 啟動 AudioContext（需使用者互動）
+// ✅ 只有在 VIZ_ENABLED 時才建立音訊分析圖（避免關閉特效時也建 graph）
 ['click','keydown','pointerdown','touchstart'].forEach(ev =>
   window.addEventListener(ev, () => {
+    if (!VIZ_ENABLED) return;
     try {
       ensureAudioGraph();
       if (audioCtx.state === 'suspended') audioCtx.resume();
@@ -405,9 +457,10 @@ function hexToRgba(c, a = 1) {
 );
 
 audio.addEventListener("play", () => {
+  if (!VIZ_ENABLED) return;
   ensureAudioGraph();
   if (audioCtx.state === "suspended") audioCtx.resume();
-  cancelAnimationFrame(rafId);
+  if (rafId) cancelAnimationFrame(rafId);
   lastT = 0;
   draw();
 });

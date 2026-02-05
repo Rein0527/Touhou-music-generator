@@ -8,6 +8,8 @@ import {
   downloadCurrentBg
 } from "./player.js";
 
+import { setVizEnabled, getVizEnabled } from "./viz.js";
+
 // 抽屜
 const playlistBtn = document.getElementById("playlistBtn");
 const playlistPanel = document.getElementById("playlistPanel");
@@ -31,6 +33,8 @@ const dlBgBtn = document.getElementById("dlBgBtn");
 // 設定項
 const toggleRepeatOne = document.getElementById("toggleRepeatOne");
 const toggleShuffle   = document.getElementById("toggleShuffle");
+const toggleViz        = document.getElementById("toggleViz");
+
 const toggleBg        = document.getElementById("toggleBg");
 const bgTagInput      = document.getElementById("bgTag");
 const bgRatingSelect  = document.getElementById("bgRating");
@@ -157,16 +161,31 @@ function wireEvents() {
     renderPlaylist();
   });
 
+  // ✅ 設定：特效（等化器）
+  toggleViz.addEventListener("change", () => {
+    STATE.vizEnabled = toggleViz.checked;
+    setVizEnabled(STATE.vizEnabled);
+  });
+
   // 設定：背景圖
   const applyBgSettings = () => {
+    // 背景
     setBgEnabled(toggleBg.checked);
     setBgTag(bgTagInput.value);
     setBgRating(bgRatingSelect.value);
     setBgFit(bgFitSelect.value);
     setBgInterval(bgIntervalInput.value);
     if (toggleBg.checked) updateDanbooruBackground(currentTrack(), /*force*/ true);
+
+    // ✅ 特效
+    STATE.vizEnabled = !!toggleViz.checked;
+    setVizEnabled(STATE.vizEnabled);
   };
-  saveSettingsBtn.addEventListener("click", () => { applyBgSettings(); settingsPanel.classList.remove("open"); });
+
+  saveSettingsBtn.addEventListener("click", () => {
+    applyBgSettings();
+    settingsPanel.classList.remove("open");
+  });
   bgRefreshBtn.addEventListener("click", () => { if (toggleBg.checked) updateDanbooruBackground(currentTrack(), /*force*/ true); });
 
   // 初始化設定值（預設 fit=contain）
@@ -178,6 +197,10 @@ function wireEvents() {
   bgIntervalInput.value = String(init.interval ?? 10);
   toggleRepeatOne.checked = (STATE.repeatMode === "one");
   toggleShuffle.checked   = STATE.shuffle;
+
+  // ✅ 初始化：特效預設關閉（以 STATE 為準）
+  toggleViz.checked = !!STATE.vizEnabled;
+  setVizEnabled(!!STATE.vizEnabled);
 
   // 初始化進度 UI
   updateProgressUI();

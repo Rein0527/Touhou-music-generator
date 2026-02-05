@@ -1,7 +1,8 @@
 // Visualizer (Canvas)
 // - Center blob (semi-transparent rainbow)
 // - Ripple rings (semi-transparent, optional follow center hue)
-// - Outer spectrum bars (opaque rainbow)  ✅ NOW: log-frequency mapping
+// - Outer spectrum bars (opaque rainbow)
+//   ✅ log-frequency mapping + dB amplitude compression + high-frequency tilt
 // - Progress arc ring (opaque)
 // - Kick detection + Auto QoS (without changing bar density)
 // - Mobile/desktop stable centering: CSS logical size via getBoundingClientRect()
@@ -23,13 +24,11 @@ export function setVizEnabled(v) {
     if (rafId) cancelAnimationFrame(rafId);
     rafId = null;
 
-    // Clear and stop
     try { ctx.setTransform(1,0,0,1,0,0); } catch {}
     ctx.clearRect(0, 0, canvas.width, canvas.height);
     return;
   }
 
-  // If enabled while playing, start immediately
   if (!audio.paused && !audio.ended) {
     ensureAudioGraph();
     if (audioCtx && audioCtx.state === "suspended") audioCtx.resume();
@@ -50,7 +49,10 @@ const CFG = {
   // Outer bars (density fixed)
   bins: 108,
   smoothing: 0.76,
-  bassBoost: 1.2, // 仍保留：低頻有節拍感（若你覺得右邊還是偏強可降到 1.2~1.5）
+
+  // ✅ Low emphasis (keep only mild kick feel; big values kill highs)
+  bassBoost: 1.05,
+
   barBase: 26,
   barGain: 190,
 
@@ -85,9 +87,13 @@ const CFG = {
   alphaRipples: 0.85,
 
   // ✅ Log-frequency mapping (power-law approximation)
-  // gamma > 1: expands low-frequency region across more of the ring
-  // 1.6 ~ 2.4 are common. Higher = more "spread" for bass.
-  freqGamma: 2.4,
+  freqGamma: 2.0,
+
+  // ✅ Amplitude shaping for bars (key to make highs move)
+  // Convert magnitude -> dB, clamp to [dbMin, dbMax], normalize to 0..1
+  dbMin: -72,      // noise floor
+  dbMax: -20,      // ceiling
+  tilt: 0.65,      // high-frequency lift (0..1)
 };
 
 // Auto QoS (does NOT change bar bins)
@@ -189,7 +195,7 @@ function resizeCanvasToDisplaySize() {
     canvas.height = needH;
   }
 
-  // Draw in CSS logical pixels (ctx scaled to match device pixels)
+  // draw in CSS logical pixels
   ctx.setTransform(scale, 0, 0, scale, 0, 0);
 }
 
@@ -252,9 +258,7 @@ function hexToRgba(c, a = 1) {
   return s;
 }
 
-// ✅ Log-frequency mapping (power-law approximation)
-// t in [0,1] => idx in [0, n-1]
-// gamma > 1 spreads low-frequency region across more of the visible bins
+// ✅ log-frequency mapping (power-law approximation)
 function logMapIndex(t, n, gamma) {
   const tt = Math.max(0, Math.min(1, t));
   const g = Math.max(1.0001, Number(gamma) || 2.0);
@@ -271,21 +275,17 @@ function draw(now = 0) {
 
   trackFPS(now);
 
-  // CSS logical size
   const W = __cssW || Math.round(canvas.getBoundingClientRect().width) || 1;
   const H = __cssH || Math.round(canvas.getBoundingClientRect().height) || 1;
 
-  // QoS.scale might change => update transform
   resizeCanvasToDisplaySize();
 
   const cx = W / 2, cy = H / 2;
   const short = Math.min(W, H);
 
-  // Bars density fixed
   const bins = CFG.bins;
   ensureAngleLUT(bins);
 
-  // Center waveform resolution adapts with QoS
   const N = Math.max(120, Math.round(QoS.baseWavePts * QoS.scale));
 
   const dt = lastT ? (now - lastT) / 1000 : 0;
@@ -327,17 +327,14 @@ function draw(now = 0) {
     huePhase = (huePhase + speed * dt) % 360;
   }
 
-  // Clear
   ctx.clearRect(0, 0, W, H);
 
-  // Accent
   const ACCENT = getComputedStyle(document.documentElement).getPropertyValue("--accent").trim() || "#6da8ff";
 
   // ==============================
-  // SAFE radius calculation (FIX)
+  // SAFE radius calculation (no clipping)
   // ==============================
   const half = short / 2;
-
   const maxBar = CFG.barBase + CFG.barGain;
 
   const progressPad = 18;
@@ -442,11 +439,18 @@ function draw(now = 0) {
   })();
 
   // =======================
-  // Outer rainbow bars (LOG-FREQ + SAFE)
+  // Outer rainbow bars (LOG-FREQ + dB COMP + TILT)
   // =======================
   (function drawBars() {
     const n = dataFreq.length;
     const gamma = CFG.freqGamma;
+
+    const dbMin = CFG.dbMin ?? -72;
+    const dbMax = CFG.dbMax ?? -20;
+    const invDbRange = 1 / Math.max(1e-6, (dbMax - dbMin));
+
+    const tilt = CFG.tilt ?? 0.65;
+    const bassBoost = CFG.bassBoost ?? 1.05;
 
     ctx.save();
     ctx.globalCompositeOperation = "lighter";
@@ -455,15 +459,28 @@ function draw(now = 0) {
     for (let i = 0; i < bins; i++) {
       const t = (bins <= 1) ? 0 : (i / (bins - 1));
 
-      // ✅ log-frequency mapping: allocate more visible bins to low frequencies
+      // log-frequency mapping
       const fftIndex = logMapIndex(t, n, gamma);
-      const v = dataFreq[fftIndex] / 255;
 
-      // keep bass emphasis (optional)
-      const lowWeight = Math.pow(1 - i / bins, 2) * (CFG.bassBoost - 1) + 1;
-      const boosted = Math.min(1, v * lowWeight);
+      // linear 0..1
+      const lin = dataFreq[fftIndex] / 255;
 
-      const bar = CFG.barBase + boosted * CFG.barGain;
+      // convert to dB (log compression)
+      const db = 20 * Math.log10(Math.max(1e-4, lin));
+
+      // normalize to 0..1
+      let m = (db - dbMin) * invDbRange;
+      m = Math.max(0, Math.min(1, m));
+
+      // high-frequency tilt (lift highs, tame lows)
+      const lift = (1 - tilt) + (2 * tilt) * t; // ~ [1-tilt, 1+tilt]
+      m = Math.max(0, Math.min(1, m * lift));
+
+      // mild bass feel (optional)
+      const lowWeight = Math.pow(1 - i / bins, 2) * (bassBoost - 1) + 1;
+      m = Math.min(1, m * lowWeight);
+
+      const bar = CFG.barBase + m * CFG.barGain;
 
       const ang = __angleLUT[i];
       const x1 = cx + ang.c * radius;
@@ -473,13 +490,13 @@ function draw(now = 0) {
       const y2 = cy + ang.s * (radius + bar);
 
       const hue = (i / bins) * 360;
-      const light = 44 + boosted * 42;
+      const light = 44 + m * 42;
       const color = `hsl(${hue}, 100%, ${light}%)`;
 
       ctx.strokeStyle = color;
       ctx.lineWidth = 3.0;
       ctx.shadowColor = color;
-      ctx.shadowBlur = Math.min(6 + boosted * 30, QoS.maxShadowBlur);
+      ctx.shadowBlur = Math.min(6 + m * 30, QoS.maxShadowBlur);
 
       ctx.beginPath();
       ctx.moveTo(x1, y1);
@@ -528,13 +545,10 @@ function draw(now = 0) {
 // =======================
 // Events
 // =======================
-
-// Resize: mobile address bar / rotation / desktop resize
 window.addEventListener("resize", () => {
   if (audioCtx) resizeCanvasToDisplaySize();
 }, { passive: true });
 
-// Ensure audio graph only when viz enabled (user gesture requirement)
 ["click","keydown","pointerdown","touchstart"].forEach(ev =>
   window.addEventListener(ev, () => {
     if (!VIZ_ENABLED) return;
@@ -545,7 +559,6 @@ window.addEventListener("resize", () => {
   }, { passive: true })
 );
 
-// Start rendering on play, but only when enabled
 audio.addEventListener("play", () => {
   if (!VIZ_ENABLED) return;
   ensureAudioGraph();

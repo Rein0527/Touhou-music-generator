@@ -50,7 +50,7 @@ const CFG = {
   // Outer bars (density fixed)
   bins: 108,
   smoothing: 0.76,
-  bassBoost: 1.8, // 仍保留：低頻有節拍感（若你覺得右邊還是偏強可降到 1.2~1.5）
+  bassBoost: 1.2, // 仍保留：低頻有節拍感（若你覺得右邊還是偏強可降到 1.2~1.5）
   barBase: 26,
   barGain: 190,
 
@@ -87,7 +87,7 @@ const CFG = {
   // ✅ Log-frequency mapping (power-law approximation)
   // gamma > 1: expands low-frequency region across more of the ring
   // 1.6 ~ 2.4 are common. Higher = more "spread" for bass.
-  freqGamma: 2.0,
+  freqGamma: 2.4,
 };
 
 // Auto QoS (does NOT change bar bins)

@@ -7,6 +7,9 @@ export const STATE = {
   shuffle: true,       // 預設開啟隨機播放
   lastVolume: 1,
 
+  // ✅ 視覺化特效（等化器）開關：預設關閉，由右下設定控制
+  vizEnabled: false,
+
   // 背景圖設定（供設定面板讀寫）
   bgEnabled: true,
   bgTag: "touhou",      // 全域預設主標籤（可被單曲覆寫）

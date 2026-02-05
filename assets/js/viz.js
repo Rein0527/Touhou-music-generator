@@ -1,7 +1,7 @@
 // Visualizer (Canvas)
 // - Center blob (semi-transparent rainbow)
 // - Ripple rings (semi-transparent, optional follow center hue)
-// - Outer spectrum bars (opaque rainbow)
+// - Outer spectrum bars (opaque rainbow)  ✅ NOW: log-frequency mapping
 // - Progress arc ring (opaque)
 // - Kick detection + Auto QoS (without changing bar density)
 // - Mobile/desktop stable centering: CSS logical size via getBoundingClientRect()
@@ -50,7 +50,7 @@ const CFG = {
   // Outer bars (density fixed)
   bins: 108,
   smoothing: 0.76,
-  bassBoost: 1.8,
+  bassBoost: 1.8, // 仍保留：低頻有節拍感（若你覺得右邊還是偏強可降到 1.2~1.5）
   barBase: 26,
   barGain: 190,
 
@@ -83,6 +83,11 @@ const CFG = {
   // Alpha controls (center + ripples)
   alphaCenter: 0.35,
   alphaRipples: 0.85,
+
+  // ✅ Log-frequency mapping (power-law approximation)
+  // gamma > 1: expands low-frequency region across more of the ring
+  // 1.6 ~ 2.4 are common. Higher = more "spread" for bass.
+  freqGamma: 2.0,
 };
 
 // Auto QoS (does NOT change bar bins)
@@ -247,6 +252,16 @@ function hexToRgba(c, a = 1) {
   return s;
 }
 
+// ✅ Log-frequency mapping (power-law approximation)
+// t in [0,1] => idx in [0, n-1]
+// gamma > 1 spreads low-frequency region across more of the visible bins
+function logMapIndex(t, n, gamma) {
+  const tt = Math.max(0, Math.min(1, t));
+  const g = Math.max(1.0001, Number(gamma) || 2.0);
+  const idx = Math.floor(Math.pow(tt, g) * (n - 1));
+  return Math.max(0, Math.min(n - 1, idx));
+}
+
 // =======================
 // Main draw
 // =======================
@@ -323,23 +338,17 @@ function draw(now = 0) {
   // ==============================
   const half = short / 2;
 
-  // Max outer bar length (boosted max=1)
   const maxBar = CFG.barBase + CFG.barGain;
 
-  // Estimate pads: progress arc width/caps + bar width + shadows + extra
-  const progressPad = 18; // progress arc width + cap safety
-  const barPad = 10;      // bar stroke width safety
+  const progressPad = 18;
+  const barPad = 10;
   const shadowPad = Math.min(24, QoS.maxShadowBlur);
   const edgePad = progressPad + barPad + shadowPad + 8;
 
-  // ring radius must fit inside bounds
   const ring = Math.max(10, half - edgePad);
 
-  // bars start radius: ensure radius + maxBar fits too
   let radius = ring - CFG.ringOffset;
   radius = Math.max(10, Math.min(radius, (half - edgePad) - maxBar));
-
-  // If canvas is very small, fall back gracefully
   if (!isFinite(radius) || radius < 10) radius = Math.max(10, ring * 0.6);
 
   // =======================
@@ -433,22 +442,27 @@ function draw(now = 0) {
   })();
 
   // =======================
-  // Outer rainbow bars (SAFE)
+  // Outer rainbow bars (LOG-FREQ + SAFE)
   // =======================
   (function drawBars() {
-    const step = Math.floor(dataFreq.length / bins) || 1;
+    const n = dataFreq.length;
+    const gamma = CFG.freqGamma;
 
     ctx.save();
     ctx.globalCompositeOperation = "lighter";
     ctx.globalAlpha = 1;
 
     for (let i = 0; i < bins; i++) {
-      const v = dataFreq[i * step] / 255;
+      const t = (bins <= 1) ? 0 : (i / (bins - 1));
 
+      // ✅ log-frequency mapping: allocate more visible bins to low frequencies
+      const fftIndex = logMapIndex(t, n, gamma);
+      const v = dataFreq[fftIndex] / 255;
+
+      // keep bass emphasis (optional)
       const lowWeight = Math.pow(1 - i / bins, 2) * (CFG.bassBoost - 1) + 1;
       const boosted = Math.min(1, v * lowWeight);
 
-      // bar length (bounded)
       const bar = CFG.barBase + boosted * CFG.barGain;
 
       const ang = __angleLUT[i];
@@ -487,7 +501,6 @@ function draw(now = 0) {
     const s = -Math.PI / 2;
     const e = s + p * Math.PI * 2;
 
-    // Background ring
     ctx.save();
     ctx.strokeStyle = "rgba(255,255,255,0.25)";
     ctx.lineWidth = 14;
@@ -496,7 +509,6 @@ function draw(now = 0) {
     ctx.stroke();
     ctx.restore();
 
-    // Progress arc
     ctx.save();
     ctx.strokeStyle = ACCENT;
     ctx.lineWidth = 12;

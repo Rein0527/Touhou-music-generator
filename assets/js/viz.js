@@ -1,23 +1,35 @@
-// 中央波動（七彩可變+半透明）+ 彩虹等化條（不透明）+ 同心波紋（半透明，可跟隨中心色）
-// + 外圈光暈（不透明）+ 圓弧進度（加強版）+ 鼓點偵測 + 自動效能調整(QoS: 不影響外圈等化條密度)
+// Visualizer (Canvas)
+// - Center blob (semi-transparent rainbow)
+// - Ripple rings (semi-transparent, optional follow center hue)
+// - Outer spectrum bars (opaque rainbow)
+// - Progress arc ring (opaque)
+// - Kick detection + Auto QoS (without changing bar density)
+// - Mobile/desktop stable centering: CSS logical size via getBoundingClientRect()
+// - FIX: prevent "boxed clipping" by using SAFE radii so nothing exceeds canvas bounds
+
 const audio  = document.getElementById("audio");
 const canvas = document.getElementById("viz");
 const ctx    = canvas.getContext("2d");
 
-// ✅ 視覺化開關（由右下設定控制，預設關閉）
+// =======================
+// Public toggle API
+// =======================
 export let VIZ_ENABLED = false;
+
 export function setVizEnabled(v) {
   VIZ_ENABLED = !!v;
 
   if (!VIZ_ENABLED) {
     if (rafId) cancelAnimationFrame(rafId);
     rafId = null;
-    // 清畫面
+
+    // Clear and stop
+    try { ctx.setTransform(1,0,0,1,0,0); } catch {}
     ctx.clearRect(0, 0, canvas.width, canvas.height);
     return;
   }
 
-  // 開啟：若正在播放，立即啟動
+  // If enabled while playing, start immediately
   if (!audio.paused && !audio.ended) {
     ensureAudioGraph();
     if (audioCtx && audioCtx.state === "suspended") audioCtx.resume();
@@ -26,74 +38,65 @@ export function setVizEnabled(v) {
     draw();
   }
 }
-export function getVizEnabled() { return VIZ_ENABLED; }
 
-// —— 可調參數 —— //
+export function getVizEnabled() {
+  return VIZ_ENABLED;
+}
+
+// =======================
+// Config
+// =======================
 const CFG = {
-  // 外圈等化條（密度固定，不隨 QoS）
+  // Outer bars (density fixed)
   bins: 108,
   smoothing: 0.76,
   bassBoost: 1.8,
   barBase: 26,
   barGain: 190,
-  ringRadiusRatio: 0.34,
+
+  // Ring positioning
   ringOffset: 56,
 
-  // 中央波動（核心）
+  // Center blob
   centerRatio: 0.22,
   centerGain: 80,
   centerBassGain: 120,
   centerGlow: 140,
-  wavePoints: 256,         // 只有中心波動會隨 QoS 調整解析度
+  wavePoints: 256,
   waveSmooth: 0.22,
 
-  // —— 中心七彩設定 —— //
-  centerRainbow: true,        // 開關：中心球七彩
-  centerHueSpeed: 40,         // 每秒旋轉幾度（越大變色越快）
-  centerHueBassSwing: 25,     // 受低頻峰值擺動的角度（0~60常用）
-  centerSat: 100,             // 飽和度（%）
-  centerLight: 55,            // 亮度（%）
-  rippleFollowCenter: true,   // 同心波紋顏色是否跟隨中心七彩
+  // Rainbow center
+  centerRainbow: true,
+  centerHueSpeed: 40,
+  centerHueBassSwing: 25,
+  centerSat: 100,
+  centerLight: 55,
 
-  // 同心波紋
+  // Ripples
+  rippleFollowCenter: true,
   rippleCount: 5,
   rippleAmp: 60,
   rippleSpeed: 2.2,
   rippleGap: 30,
   rippleAlpha: 0.85,
 
-  // —— 透明度控制（只作用在中心球與波紋） —— //
-  alphaCenter: 0.35,   // 中心球
-  alphaRipples: 0.85,  // 波紋
+  // Alpha controls (center + ripples)
+  alphaCenter: 0.35,
+  alphaRipples: 0.85,
 };
 
-// —— 效能自動調整（Auto QoS）—— //
-// 注意：QoS 只影響中心波動解析度、DPR 實體像素、陰影上限；不影響外圈等化條的 bins。
+// Auto QoS (does NOT change bar bins)
 const QoS = {
-  minFps: 50,          // 低於此幀數就降畫質
-  maxFps: 58,          // 高於此幀數就升畫質
-  scale: 1.0,          // 畫質倍率（0.70~1.20）
+  minFps: 50,
+  maxFps: 58,
+  scale: 1.0,
   minScale: 0.70,
   maxScale: 1.20,
   baseWavePts: CFG.wavePoints,
-  // 陰影開銷上限（避免過大 shadowBlur）
-  maxShadowBlur: 24
+  maxShadowBlur: 24,
 };
-let __fps_t = 0, __fps_frames = 0, __fps_val = 60;
-function trackFPS(now){
-  if (!__fps_t) __fps_t = now;
-  __fps_frames++;
-  const dt = now - __fps_t;
-  if (dt >= 500){ // 每 0.5 秒估一次
-    __fps_val = (__fps_frames * 1000) / dt;
-    __fps_frames = 0;
-    __fps_t = now;
-    if (__fps_val < QoS.minFps) QoS.scale = Math.max(QoS.minScale, QoS.scale - 0.05);
-    else if (__fps_val > QoS.maxFps) QoS.scale = Math.min(QoS.maxScale, QoS.scale + 0.05);
-  }
-}
 
-// —— 鼓點強化參數 —— //
+// Kick detection tuning
 const KICK = {
   bandRatio: 1/6,
   threshMul: 1.35,
@@ -106,29 +109,47 @@ const KICK = {
   glowBoost: 1.1,
 };
 
+// =======================
+// Audio graph
+// =======================
 let audioCtx, analyser, srcNode;
 let dataFreq, dataTime;
-let rafId;
 
+// =======================
+// Render state
+// =======================
+let rafId = null;
 let phase = 0;
 let lastT = 0;
 
-// 七彩相位
 let huePhase = 0;
 
-// 音量/節拍包絡
 let volEnv = 0;
 let bassPeak = 0;
 const ATTACK = 0.45;
 const RELEASE = 0.1;
 const PEAK_DECAY = 0.93;
 
-// 鼓點狀態
 let kickEnv = 0;
 let bassMeanLT = 0;
 let lastKickT = 0;
 
-// 角度查表（降低 trig 開銷；bins 固定依 CFG.bins 建立）
+// FPS tracker
+let __fps_t = 0, __fps_frames = 0, __fps_val = 60;
+function trackFPS(now){
+  if (!__fps_t) __fps_t = now;
+  __fps_frames++;
+  const dt = now - __fps_t;
+  if (dt >= 500){
+    __fps_val = (__fps_frames * 1000) / dt;
+    __fps_frames = 0;
+    __fps_t = now;
+    if (__fps_val < QoS.minFps) QoS.scale = Math.max(QoS.minScale, QoS.scale - 0.05);
+    else if (__fps_val > QoS.maxFps) QoS.scale = Math.min(QoS.maxScale, QoS.scale + 0.05);
+  }
+}
+
+// Angle LUT
 let __angleLUT = null;
 function ensureAngleLUT(bins) {
   if (!__angleLUT || __angleLUT.length !== bins) {
@@ -140,8 +161,11 @@ function ensureAngleLUT(bins) {
   }
 }
 
-// ✅ 用 CSS 實際顯示尺寸當邏輯座標（修手機置中）
+// =======================
+// Canvas sizing (CSS logical size -> device pixels)
+// =======================
 let __cssW = 0, __cssH = 0;
+
 function resizeCanvasToDisplaySize() {
   const rect = canvas.getBoundingClientRect();
   const cssW = Math.max(1, Math.round(rect.width));
@@ -159,12 +183,14 @@ function resizeCanvasToDisplaySize() {
     canvas.width = needW;
     canvas.height = needH;
   }
-  // 之後 draw 都用「CSS 邏輯座標」在畫（ctx 已經縮放好了）
+
+  // Draw in CSS logical pixels (ctx scaled to match device pixels)
   ctx.setTransform(scale, 0, 0, scale, 0, 0);
 }
 
 function ensureAudioGraph() {
   if (audioCtx) return;
+
   audioCtx = new (window.AudioContext || window.webkitAudioContext)();
   analyser = audioCtx.createAnalyser();
   analyser.fftSize = 2048;
@@ -180,6 +206,9 @@ function ensureAudioGraph() {
   resizeCanvasToDisplaySize();
 }
 
+// =======================
+// Helpers
+// =======================
 function computeLevels(arr) {
   let sum = 0;
   for (let i = 0; i < arr.length; i++) sum += arr[i];
@@ -203,30 +232,45 @@ function smoothArray(a, k = 0.2) {
   }
   return out;
 }
+
 function lerp(a, b, t) { return a + (b - a) * t; }
 
+function hexToRgba(c, a = 1) {
+  const s = String(c || "").trim();
+  if (s.startsWith("#")) {
+    let r, g, b;
+    if (s.length === 7) { r = parseInt(s.slice(1,3),16); g = parseInt(s.slice(3,5),16); b = parseInt(s.slice(5,7),16); }
+    else if (s.length === 4) { r = parseInt(s[1]+s[1],16); g = parseInt(s[2]+s[2],16); b = parseInt(s[3]+s[3],16); }
+    else return s;
+    return `rgba(${r},${g},${b},${a})`;
+  }
+  return s;
+}
+
+// =======================
+// Main draw
+// =======================
 function draw(now = 0) {
   if (!VIZ_ENABLED) return;
+  if (!analyser) return;
 
   trackFPS(now);
 
-  // ✅ 用 CSS 邏輯尺寸，不用 canvas.width/height（那是實體像素）
+  // CSS logical size
   const W = __cssW || Math.round(canvas.getBoundingClientRect().width) || 1;
   const H = __cssH || Math.round(canvas.getBoundingClientRect().height) || 1;
 
-  // QoS.scale 可能會變 → 每幀順便校正 transform（很便宜）
+  // QoS.scale might change => update transform
   resizeCanvasToDisplaySize();
 
   const cx = W / 2, cy = H / 2;
   const short = Math.min(W, H);
-  const radius = short * CFG.ringRadiusRatio;
-  const ring = radius + CFG.ringOffset;
 
-  // —— 這裡 bins 固定，不隨 QoS —— //
+  // Bars density fixed
   const bins = CFG.bins;
   ensureAngleLUT(bins);
 
-  // 中心波動解析度仍隨 QoS 調整
+  // Center waveform resolution adapts with QoS
   const N = Math.max(120, Math.round(QoS.baseWavePts * QoS.scale));
 
   const dt = lastT ? (now - lastT) / 1000 : 0;
@@ -237,7 +281,7 @@ function draw(now = 0) {
   analyser.getByteTimeDomainData(dataTime);
   const { avg, bass } = computeLevels(dataFreq);
 
-  // —— 鼓點偵測 —— //
+  // ---- Kick detection ----
   const totalBins = dataFreq.length;
   const lowEndKick = Math.max(8, Math.floor(totalBins * KICK.bandRatio));
   let lowSum = 0;
@@ -254,7 +298,7 @@ function draw(now = 0) {
   if (canKick && overThresh && diffOk) { kickEnv = 1; lastKickT = nowMs; }
   else { kickEnv *= KICK.decay; }
 
-  // —— 音量包絡 —— //
+  // ---- Volume envelope ----
   const targetVol = Math.min(1, avg * 0.9 + bass * 0.8);
   const k = (targetVol > volEnv) ? ATTACK : RELEASE;
   volEnv = lerp(volEnv, targetVol, k);
@@ -262,19 +306,45 @@ function draw(now = 0) {
   if (bass > bassPeak) bassPeak = bass;
   else bassPeak *= PEAK_DECAY;
 
-  // —— 中心七彩相位推進 —— //
+  // ---- Center hue ----
   if (CFG.centerRainbow) {
-    const speed = CFG.centerHueSpeed * (1 + 0.6 * bassPeak); // 低頻來時轉快一點
+    const speed = CFG.centerHueSpeed * (1 + 0.6 * bassPeak);
     huePhase = (huePhase + speed * dt) % 360;
   }
 
+  // Clear
   ctx.clearRect(0, 0, W, H);
 
-  // 主題色（保留給等化條/外圈/進度弧用）
-  const ACCENT = getComputedStyle(document.documentElement)
-    .getPropertyValue('--accent').trim() || "#6da8ff";
+  // Accent
+  const ACCENT = getComputedStyle(document.documentElement).getPropertyValue("--accent").trim() || "#6da8ff";
 
-  // —— 中央波動（七彩 + 半透明 + 鼓點加成） —— //
+  // ==============================
+  // SAFE radius calculation (FIX)
+  // ==============================
+  const half = short / 2;
+
+  // Max outer bar length (boosted max=1)
+  const maxBar = CFG.barBase + CFG.barGain;
+
+  // Estimate pads: progress arc width/caps + bar width + shadows + extra
+  const progressPad = 18; // progress arc width + cap safety
+  const barPad = 10;      // bar stroke width safety
+  const shadowPad = Math.min(24, QoS.maxShadowBlur);
+  const edgePad = progressPad + barPad + shadowPad + 8;
+
+  // ring radius must fit inside bounds
+  const ring = Math.max(10, half - edgePad);
+
+  // bars start radius: ensure radius + maxBar fits too
+  let radius = ring - CFG.ringOffset;
+  radius = Math.max(10, Math.min(radius, (half - edgePad) - maxBar));
+
+  // If canvas is very small, fall back gracefully
+  if (!isFinite(radius) || radius < 10) radius = Math.max(10, ring * 0.6);
+
+  // =======================
+  // Center blob
+  // =======================
   (function drawCenterBlob() {
     const wave = new Float32Array(dataTime.length);
     for (let i = 0; i < dataTime.length; i++) wave[i] = (dataTime[i] - 128) / 128;
@@ -288,9 +358,9 @@ function draw(now = 0) {
 
     const step = sm.length / N;
 
-    // 決定中心色：取同心波紋色相 huePhase 的反色（+180°）
     const baseHue = CFG.centerRainbow ? (huePhase + CFG.centerHueBassSwing * bassPeak) % 360 : 210;
     const hue = (baseHue + 180) % 360;
+
     const centerStroke = `hsl(${hue}, ${CFG.centerSat}%, ${CFG.centerLight + 5}%)`;
     const centerFill   = `hsla(${hue}, ${CFG.centerSat}%, ${CFG.centerLight}%, 0.85)`;
     const centerGlow   = `hsl(${hue}, ${CFG.centerSat}%, ${Math.min(70, CFG.centerLight + 15)}%)`;
@@ -299,14 +369,12 @@ function draw(now = 0) {
     ctx.globalCompositeOperation = "lighter";
     ctx.globalAlpha = CFG.alphaCenter;
 
-    // 鼓點時光暈更亮（加上上限）
     ctx.shadowColor = centerGlow;
     ctx.shadowBlur = Math.min(
       (CFG.centerGlow * (0.5 + volEnv)) * (1 + KICK.glowBoost * kickEnv * 0.5),
       QoS.maxShadowBlur
     );
 
-    // 漸層（中心白 → 主色 → 透明）
     const grad = ctx.createRadialGradient(cx, cy, base * 0.18, cx, cy, base + gain + bassPush + 20);
     grad.addColorStop(0.00, "rgba(255,255,255,0.40)");
     grad.addColorStop(0.25, centerFill);
@@ -321,25 +389,28 @@ function draw(now = 0) {
       const r = base + w * gain + bassPush;
       const x = cx + Math.cos(a) * r;
       const y = cy + Math.sin(a) * r;
-      if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+      if (i === 0) ctx.moveTo(x, y);
+      else ctx.lineTo(x, y);
     }
     ctx.closePath();
     ctx.fill();
 
-    // 外緣描邊：用同色（線寬下修以省資源）
     ctx.strokeStyle = centerStroke;
     ctx.lineWidth = 2.4 + volEnv * 1.8;
     ctx.stroke();
+
     ctx.restore();
   })();
 
-  // —— 同心波紋（可跟隨中心色 + 半透明 + 鼓點加成） —— //
+  // =======================
+  // Ripples
+  // =======================
   (function drawRipples() {
     ctx.save();
     ctx.globalCompositeOperation = "lighter";
 
     const hue = CFG.centerRainbow ? (huePhase + 10) % 360 : null;
-    const rippleColor = CFG.rippleFollowCenter && CFG.centerRainbow
+    const rippleColor = (CFG.rippleFollowCenter && CFG.centerRainbow)
       ? `hsla(${hue}, ${CFG.centerSat}%, ${CFG.centerLight + 10}%, 0.9)`
       : hexToRgba(ACCENT, 0.9);
 
@@ -353,6 +424,7 @@ function draw(now = 0) {
 
       const dyn = CFG.rippleAlpha * (0.95 - i / (CFG.rippleCount + 1)) * (0.6 + 0.4 * (volEnv + bassPeak));
       ctx.globalAlpha = CFG.alphaRipples * dyn;
+
       ctx.beginPath();
       ctx.arc(cx, cy, r, 0, Math.PI * 2);
       ctx.stroke();
@@ -360,22 +432,31 @@ function draw(now = 0) {
     ctx.restore();
   })();
 
-  // —— 彩虹等化條（不透明；bins 固定） —— //
+  // =======================
+  // Outer rainbow bars (SAFE)
+  // =======================
   (function drawBars() {
     const step = Math.floor(dataFreq.length / bins) || 1;
+
     ctx.save();
     ctx.globalCompositeOperation = "lighter";
     ctx.globalAlpha = 1;
 
     for (let i = 0; i < bins; i++) {
       const v = dataFreq[i * step] / 255;
+
       const lowWeight = Math.pow(1 - i / bins, 2) * (CFG.bassBoost - 1) + 1;
       const boosted = Math.min(1, v * lowWeight);
+
+      // bar length (bounded)
       const bar = CFG.barBase + boosted * CFG.barGain;
 
       const ang = __angleLUT[i];
-      const x1 = cx + ang.c * radius,           y1 = cy + ang.s * radius;
-      const x2 = cx + ang.c * (radius + bar),   y2 = cy + ang.s * (radius + bar);
+      const x1 = cx + ang.c * radius;
+      const y1 = cy + ang.s * radius;
+
+      const x2 = cx + ang.c * (radius + bar);
+      const y2 = cy + ang.s * (radius + bar);
 
       const hue = (i / bins) * 360;
       const light = 44 + boosted * 42;
@@ -391,15 +472,22 @@ function draw(now = 0) {
       ctx.lineTo(x2, y2);
       ctx.stroke();
     }
+
     ctx.restore();
   })();
 
-  // —— 圓弧進度（加強版） —— //
+  // =======================
+  // Progress arc ring (SAFE)
+  // =======================
   (function drawProgress() {
-    const d = audio.duration || 0, ct = audio.currentTime || 0, p = d > 0 ? (ct / d) : 0;
-    const s = -Math.PI / 2, e = s + p * Math.PI * 2;
+    const d = audio.duration || 0;
+    const ct = audio.currentTime || 0;
+    const p = d > 0 ? (ct / d) : 0;
 
-    // 背景弧
+    const s = -Math.PI / 2;
+    const e = s + p * Math.PI * 2;
+
+    // Background ring
     ctx.save();
     ctx.strokeStyle = "rgba(255,255,255,0.25)";
     ctx.lineWidth = 14;
@@ -408,13 +496,12 @@ function draw(now = 0) {
     ctx.stroke();
     ctx.restore();
 
-    // 進度弧（不透明 + 光暈）
+    // Progress arc
     ctx.save();
-    const accent2 = ACCENT;
-    ctx.strokeStyle = accent2;
+    ctx.strokeStyle = ACCENT;
     ctx.lineWidth = 12;
     ctx.lineCap = "round";
-    ctx.shadowColor = accent2;
+    ctx.shadowColor = ACCENT;
     ctx.shadowBlur = Math.min(25, QoS.maxShadowBlur);
     ctx.globalAlpha = 0.95;
     ctx.beginPath();
@@ -426,40 +513,31 @@ function draw(now = 0) {
   rafId = requestAnimationFrame(draw);
 }
 
-// HEX 轉 RGBA（未用到會原樣返回）
-function hexToRgba(c, a = 1) {
-  const s = c.trim();
-  if (s.startsWith("#")) {
-    let r, g, b;
-    if (s.length === 7) { r = parseInt(s.slice(1,3),16); g = parseInt(s.slice(3,5),16); b = parseInt(s.slice(5,7),16); }
-    else if (s.length === 4) { r = parseInt(s[1]+s[1],16); g = parseInt(s[2]+s[2],16); b = parseInt(s[3]+s[3],16); }
-    else { return s; }
-    return `rgba(${r},${g},${b},${a})`;
-  }
-  return s;
-}
+// =======================
+// Events
+// =======================
 
-// ✅ 手機旋轉/網址列收合會改變 rect，resize 需要跟著更新
+// Resize: mobile address bar / rotation / desktop resize
 window.addEventListener("resize", () => {
   if (audioCtx) resizeCanvasToDisplaySize();
 }, { passive: true });
 
-// 啟動 AudioContext（需使用者互動）
-// ✅ 只有在 VIZ_ENABLED 時才建立音訊分析圖（避免關閉特效時也建 graph）
-['click','keydown','pointerdown','touchstart'].forEach(ev =>
+// Ensure audio graph only when viz enabled (user gesture requirement)
+["click","keydown","pointerdown","touchstart"].forEach(ev =>
   window.addEventListener(ev, () => {
     if (!VIZ_ENABLED) return;
     try {
       ensureAudioGraph();
-      if (audioCtx.state === 'suspended') audioCtx.resume();
+      if (audioCtx && audioCtx.state === "suspended") audioCtx.resume();
     } catch {}
-  }, { passive:true })
+  }, { passive: true })
 );
 
+// Start rendering on play, but only when enabled
 audio.addEventListener("play", () => {
   if (!VIZ_ENABLED) return;
   ensureAudioGraph();
-  if (audioCtx.state === "suspended") audioCtx.resume();
+  if (audioCtx && audioCtx.state === "suspended") audioCtx.resume();
   if (rafId) cancelAnimationFrame(rafId);
   lastT = 0;
   draw();

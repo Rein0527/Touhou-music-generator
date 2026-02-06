@@ -1,12 +1,11 @@
 // Visualizer (Canvas)
 // - Center blob (semi-transparent rainbow)
 // - Ripple rings (semi-transparent, optional follow center hue)
-// - Outer spectrum bars (opaque rainbow)
-//   ✅ log-frequency mapping + dB amplitude compression + high-frequency tilt
+// - Outer spectrum bars (opaque rainbow)  ✅ NORMAL: linear magnitude mapping
 // - Progress arc ring (opaque)
 // - Kick detection + Auto QoS (without changing bar density)
-// - Mobile/desktop stable centering: CSS logical size via getBoundingClientRect()
-// - FIX: prevent "boxed clipping" by using SAFE radii so nothing exceeds canvas bounds
+// - Stable sizing: CSS logical size via getBoundingClientRect()
+// - SAFE radii: prevent clipping/overflow
 
 const audio  = document.getElementById("audio");
 const canvas = document.getElementById("viz");
@@ -43,15 +42,15 @@ export function getVizEnabled() {
 }
 
 // =======================
-// Config
+// Config (NORMAL EQ)
 // =======================
 const CFG = {
   // Outer bars (density fixed)
   bins: 108,
   smoothing: 0.76,
 
-  // ✅ Low emphasis (keep only mild kick feel; big values kill highs)
-  bassBoost: 1.05,
+  // ✅ NORMAL feel: mild bass emphasis (set 1.0 to disable)
+  bassBoost: 1.35,
 
   barBase: 26,
   barGain: 190,
@@ -85,15 +84,6 @@ const CFG = {
   // Alpha controls (center + ripples)
   alphaCenter: 0.35,
   alphaRipples: 0.85,
-
-  // ✅ Log-frequency mapping (power-law approximation)
-  freqGamma: 2.0,
-
-  // ✅ Amplitude shaping for bars (key to make highs move)
-  // Convert magnitude -> dB, clamp to [dbMin, dbMax], normalize to 0..1
-  dbMin: -72,      // noise floor
-  dbMax: -20,      // ceiling
-  tilt: 0.65,      // high-frequency lift (0..1)
 };
 
 // Auto QoS (does NOT change bar bins)
@@ -256,14 +246,6 @@ function hexToRgba(c, a = 1) {
     return `rgba(${r},${g},${b},${a})`;
   }
   return s;
-}
-
-// ✅ log-frequency mapping (power-law approximation)
-function logMapIndex(t, n, gamma) {
-  const tt = Math.max(0, Math.min(1, t));
-  const g = Math.max(1.0001, Number(gamma) || 2.0);
-  const idx = Math.floor(Math.pow(tt, g) * (n - 1));
-  return Math.max(0, Math.min(n - 1, idx));
 }
 
 // =======================
@@ -439,64 +421,41 @@ function draw(now = 0) {
   })();
 
   // =======================
-  // Outer rainbow bars (LOG-FREQ + dB COMP + TILT)
+  // Outer rainbow bars (NORMAL: linear mapping)
   // =======================
   (function drawBars() {
     const n = dataFreq.length;
-    const gamma = CFG.freqGamma;
-
-    const dbMin = CFG.dbMin ?? -72;
-    const dbMax = CFG.dbMax ?? -20;
-    const invDbRange = 1 / Math.max(1e-6, (dbMax - dbMin));
-
-    const tilt = CFG.tilt ?? 0.65;
-    const bassBoost = CFG.bassBoost ?? 1.05;
+    const step = n / bins;
 
     ctx.save();
     ctx.globalCompositeOperation = "lighter";
     ctx.globalAlpha = 1;
 
     for (let i = 0; i < bins; i++) {
-      const t = (bins <= 1) ? 0 : (i / (bins - 1));
+      // linear FFT index sampling
+      const fftIndex = Math.min(n - 1, Math.floor(i * step));
+      const v = dataFreq[fftIndex] / 255; // 0..1
 
-      // log-frequency mapping
-      const fftIndex = logMapIndex(t, n, gamma);
+      // mild bass emphasis (optional)
+      const lowWeight = Math.pow(1 - i / bins, 2) * (CFG.bassBoost - 1) + 1;
+      const boosted = Math.min(1, v * lowWeight);
 
-      // linear 0..1
-      const lin = dataFreq[fftIndex] / 255;
-
-      // convert to dB (log compression)
-      const db = 20 * Math.log10(Math.max(1e-4, lin));
-
-      // normalize to 0..1
-      let m = (db - dbMin) * invDbRange;
-      m = Math.max(0, Math.min(1, m));
-
-      // high-frequency tilt (lift highs, tame lows)
-      const lift = (1 - tilt) + (2 * tilt) * t; // ~ [1-tilt, 1+tilt]
-      m = Math.max(0, Math.min(1, m * lift));
-
-      // mild bass feel (optional)
-      const lowWeight = Math.pow(1 - i / bins, 2) * (bassBoost - 1) + 1;
-      m = Math.min(1, m * lowWeight);
-
-      const bar = CFG.barBase + m * CFG.barGain;
+      const bar = CFG.barBase + boosted * CFG.barGain;
 
       const ang = __angleLUT[i];
       const x1 = cx + ang.c * radius;
       const y1 = cy + ang.s * radius;
-
       const x2 = cx + ang.c * (radius + bar);
       const y2 = cy + ang.s * (radius + bar);
 
       const hue = (i / bins) * 360;
-      const light = 44 + m * 42;
+      const light = 44 + boosted * 42;
       const color = `hsl(${hue}, 100%, ${light}%)`;
 
       ctx.strokeStyle = color;
       ctx.lineWidth = 3.0;
       ctx.shadowColor = color;
-      ctx.shadowBlur = Math.min(6 + m * 30, QoS.maxShadowBlur);
+      ctx.shadowBlur = Math.min(6 + boosted * 30, QoS.maxShadowBlur);
 
       ctx.beginPath();
       ctx.moveTo(x1, y1);

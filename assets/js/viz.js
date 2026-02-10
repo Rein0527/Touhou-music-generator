@@ -1,11 +1,12 @@
-// viz.js — 2.5D Atom Electrons Visualizer (Kr config 2,8,18,8)
-// Updates:
-// - 4 orthogonal orbital planes (per shell fixed)
-// - Progress ring thinner/dimmer
-// - Longer tails
-// - Stronger 3D depth
-// - Smaller/dimmer nucleus glow
-// - More varied electron colors (freq base + dynamic hue drift)
+// viz.js — 2.5D Quantum Orbital (p-orbital / figure-eight) Visualizer
+// - 36 electrons in 4 shells: 2 / 8 / 18 / 8 (Kr-like distribution)
+// - Paths: figure-eight via Lissajous curves (quantum-orbital vibe)
+// - Color = frequency, brightness/size/tail = amplitude
+// - 2.5D depth: pseudo-z affects scale/alpha + depth sorting
+// - Beat coupling: orbit speed & tail respond to bass/overall energy envelope
+// - Softer nucleus glow, thinner/dimmer progress ring
+// - Stable sizing: getBoundingClientRect + DPR + QoS scale
+// - SAFE radii to avoid clipping
 
 const audio  = document.getElementById("audio");
 const canvas = document.getElementById("viz");
@@ -44,57 +45,59 @@ export function getVizEnabled() {
 // Config
 // =======================
 const CFG = {
-  // Visual / trails
-  trailAlpha: 0.085,       // lower = longer trails (was 0.10)
-  glowMax: 26,
-  electronBaseSize: 2.6,
-  electronSizeGain: 5.2,
+  // Trails (motion glow)
+  trailAlpha: 0.12,            // ↑ a bit = shorter trails (cleaner); lower = longer
+  glowMax: 22,
+  electronBaseSize: 2.2,
+  electronSizeGain: 5.6,
+  tailBase: 10,
+  tailGain: 52,
 
-  // ✅ longer tails
-  tailBase: 14,            // was 10
-  tailGain: 72,            // was 46
-
-  // Shell (Kr): 2, 8, 18, 8  => 36
+  // Shells: 2, 8, 18, 8 => 36
   shells: [2, 8, 18, 8],
 
   // Orbit layout (relative to safe ring radius)
-  orbitMin: 0.38,
-  orbitMax: 0.62,
-  shellGapJitter: 14,      // slightly stronger orbit jitter (was 12)
-  orbitEccMin: 0.10,
-  orbitEccMax: 0.30,
+  orbitMin: 0.34,
+  orbitMax: 0.60,
+  orbitJitter: 14,             // amplitude -> radius modulation
+  orbitLineAlpha: 0.05,        // subtle orbit guide
 
-  // ✅ 3D projection (stronger)
-  zDepth: 1.25,            // was 0.85
-  zTiltY: 0.52,            // was 0.32
-  zScaleMin: 0.62,         // was 0.70
-  zScaleMax: 1.28,         // was 1.15
-  zAlphaMin: 0.18,         // was 0.25
+  // Figure-eight / quantum vibe
+  // Lissajous: x = sin(a t + dx), y = sin(b t + dy), choose (a,b) = (1,2)
+  lissaA: 1,
+  lissaB: 2,
+  lissaPhaseJitter: 0.9,       // per-electron phase variety
+  lissaAspect: 0.88,           // squash/stretch
+
+  // 2.5D projection (make depth stronger)
+  zDepth: 1.15,                // ✅ increased
+  zTiltY: 0.48,                // ✅ increased (perspective)
+  zScaleMin: 0.62,
+  zScaleMax: 1.28,
+  zAlphaMin: 0.18,
   zAlphaMax: 1.00,
 
-  // Motion
-  baseSpeed: 0.55,
-  speedGain: 1.35,
-  shellSpeedMul: [0.72, 1.00, 1.18, 1.34],
+  // Motion + beat coupling
+  baseSpeed: 0.65,             // baseline speed
+  speedGain: 2.10,             // amplitude increases speed
+  beatSpeedMul: 2.20,          // ✅ beat envelope multiplies speed
+  shellSpeedMul: [0.85, 1.00, 1.15, 1.35], // outer shells slightly faster
 
   // Frequency mapping
-  freqGamma: 2.0,
-  smoothing: 0.76,
+  freqGamma: 2.1,              // log-frequency mapping exponent (>=1)
+  smoothing: 0.78,
 
-  // ✅ Nucleus (smaller/dimmer)
-  nucleusRatio: 0.18,      // was 0.22
-  nucleusGlow: 48,         // was 120
-  nucleusAlpha: 0.10,      // was 0.20
+  // Nucleus (reduce)
+  nucleusRatio: 0.16,          // ✅ smaller
+  nucleusGlow: 60,             // ✅ less blur
+  nucleusAlpha: 0.12,          // ✅ dimmer
 
-  // ✅ Progress ring thinner/dimmer
-  progressWidthBg: 6,      // was 12
-  progressWidthFg: 4,      // was 10
-  progressBgAlpha: 0.12,
-  progressFgAlpha: 0.42,
-  progressGlow: 0,         // was glowy; now basically off
-
-  // Orbits visibility
-  orbitLineBaseAlpha: 0.035, // subtle
+  // Progress ring (reduce thickness & brightness)
+  progressAlphaBg: 0.10,
+  progressAlphaFg: 0.55,
+  progressWidthBg: 6,          // ✅ thinner
+  progressWidthFg: 4,          // ✅ thinner
+  progressGlow: 10,            // ✅ less glow
 };
 
 // Auto QoS (does not change electron count)
@@ -104,7 +107,7 @@ const QoS = {
   scale: 1.0,
   minScale: 0.70,
   maxScale: 1.20,
-  maxShadowBlur: 24,
+  maxShadowBlur: 22,
 };
 
 // =======================
@@ -122,7 +125,12 @@ let lastT = 0;
 let __cssW = 0, __cssH = 0;
 let __fps_t = 0, __fps_frames = 0, __fps_val = 60;
 
-// electrons array
+// Beat envelopes
+let volEnv = 0;     // overall energy
+let bassEnv = 0;    // low frequency energy
+let beatEnv = 0;    // combined / emphasized envelope
+
+// Electrons
 let electrons = null;
 
 // =======================
@@ -195,20 +203,35 @@ function ensureAudioGraph() {
 }
 
 // =======================
-// 4 orthogonal planes (per shell fixed)
-// In 2.5D: we fake plane orientation by mapping z -> x/y influence.
-// These 4 are designed to feel like mutually perpendicular orbital planes.
+// Energy / Beat extraction
 // =======================
-const ORTHO_PLANES = [
-  // Shell 0: mostly "XY" (thin z influence)
-  { px: 0.06, py: 0.06, phase: 0.0 },
-  // Shell 1: "XZ-like" (z pushes x more)
-  { px: 0.55, py: 0.08, phase: 1.2 },
-  // Shell 2: "YZ-like" (z pushes y more)
-  { px: 0.08, py: 0.55, phase: 2.4 },
-  // Shell 3: diagonal plane (orthogonal-ish feel vs first three)
-  { px: 0.40, py: -0.40, phase: 3.6 },
-];
+function computeEnergy() {
+  // dataFreq contains 0..255
+  let sum = 0;
+  for (let i = 0; i < dataFreq.length; i++) sum += dataFreq[i];
+  const avg = (sum / (dataFreq.length * 255)) || 0;
+
+  const lowEnd = Math.max(8, Math.floor(dataFreq.length / 7));
+  let bsum = 0;
+  for (let i = 0; i < lowEnd; i++) bsum += dataFreq[i];
+  const bass = (bsum / (lowEnd * 255)) || 0;
+
+  // Envelope (fast attack, slower release)
+  const ATT = 0.35;
+  const REL = 0.08;
+
+  const volTarget  = Math.min(1, avg * 0.95 + bass * 0.55);
+  const bassTarget = Math.min(1, bass * 1.25);
+
+  volEnv  = lerp(volEnv,  volTarget,  volTarget  > volEnv  ? ATT : REL);
+  bassEnv = lerp(bassEnv, bassTarget, bassTarget > bassEnv ? ATT : REL);
+
+  // Beat emphasized: bass dominates but overall helps
+  const beatTarget = clamp01(bassEnv * 0.85 + volEnv * 0.35);
+  beatEnv = lerp(beatEnv, beatTarget, beatTarget > beatEnv ? 0.40 : 0.12);
+
+  return { avg, bass };
+}
 
 // =======================
 // Electrons init (Kr shells)
@@ -222,30 +245,70 @@ function initElectrons() {
 
   for (let s = 0; s < shells.length; s++) {
     const count = shells[s];
-    const plane = ORTHO_PLANES[s % ORTHO_PLANES.length];
+
+    // A "plane" for each shell (gives distinct orbital orientations)
+    // We’ll keep this deterministic-ish for a nice look:
+    // inner shells less tilted, outer more tilted.
+    const tiltBase = 0.10 + 0.12 * s;
+    const plane = {
+      tiltX: (Math.random() * 2 - 1) * tiltBase,
+      tiltY: (Math.random() * 2 - 1) * tiltBase,
+      phi: Math.random() * Math.PI * 2,
+    };
 
     for (let j = 0; j < count; j++) {
       const t = (total <= 1) ? 0 : (globalIndex / (total - 1)); // 0..1 low->high
-
-      // Base hue from frequency (low->high)
-      const baseHue = 260 - 240 * t;
+      const hue = 260 - 240 * t; // low freq purple -> high freq green/yellow
 
       electrons.push({
         shell: s,
         j,
         tFreq: t,
-        baseHue,
-        a: (j / count) * Math.PI * 2,  // evenly spread
-        w: CFG.baseSpeed * (CFG.shellSpeedMul[s] ?? 1.0) * (0.85 + 0.30 * Math.random()),
-        ecc: lerp(CFG.orbitEccMin, CFG.orbitEccMax, Math.random()),
-        phi: Math.random() * Math.PI * 2,
+        hue,
+
+        // parameter along the curve
+        u: (j / count) * Math.PI * 2,
+
+        // base angular velocity
+        w: CFG.baseSpeed * (CFG.shellSpeedMul[s] ?? 1.0) * (0.80 + 0.35 * Math.random()),
+
+        // per-electron phases for variety
+        dx: (Math.random() * 2 - 1) * CFG.lissaPhaseJitter,
+        dy: (Math.random() * 2 - 1) * CFG.lissaPhaseJitter,
+        dz: Math.random() * Math.PI * 2,
+
+        // per-electron curve shaping
+        aspect: CFG.lissaAspect * (0.85 + 0.30 * Math.random()),
+
+        // plane
         plane,
+
+        // smoothed band energy
         e: 0,
       });
 
       globalIndex++;
     }
   }
+}
+
+// =======================
+// Lissajous figure-eight (p-orbital vibe)
+// =======================
+// Returns local (x,y,zLike) in [-1..1] range-ish
+function lissajous8(u, dx, dy, dz) {
+  // Base "8": a=1, b=2
+  const a = CFG.lissaA;
+  const b = CFG.lissaB;
+
+  const x = Math.sin(a * u + dx);
+  const y = Math.sin(b * u + dy);
+
+  // pseudo-z oscillation (for depth), not true 3D but enough for 2.5D
+  // tie to curve position so it looks like it goes in/out of the screen
+  const z = Math.sin(u + dz) * 0.95;
+
+  return { x, y, z };
 }
 
 // =======================
@@ -269,6 +332,7 @@ function draw(now = 0) {
   lastT = now;
 
   analyser.getByteFrequencyData(dataFreq);
+  computeEnergy();
 
   if (!electrons) initElectrons();
 
@@ -284,29 +348,38 @@ function draw(now = 0) {
   // ==============================
   // SAFE radii (avoid clipping)
   // ==============================
-  const progressPad = 10;
-  const electronPad = 26;
+  const progressPad = 12;
+  const electronPad = 20;
   const shadowPad = Math.min(22, QoS.maxShadowBlur);
-  const edgePad = progressPad + electronPad + shadowPad + 8;
+  const edgePad = progressPad + electronPad + shadowPad + 10;
 
   const ring = Math.max(12, half - edgePad);
+
+  // Shell radii (inside ring)
   const rMin = ring * CFG.orbitMin;
   const rMax = ring * CFG.orbitMax;
 
-  // Nucleus
-  const nucleusR = Math.max(7, short * CFG.nucleusRatio);
+  // Shell base radii
+  const shellCount = CFG.shells.length;
+  const shellBase = new Array(shellCount);
+  for (let s = 0; s < shellCount; s++) {
+    const tt = (shellCount <= 1) ? 0 : (s / (shellCount - 1));
+    shellBase[s] = lerp(rMin, rMax, tt);
+  }
 
   // =======================
-  // Nucleus glow (smaller/dimmer)
+  // Nucleus (smaller & dimmer)
   // =======================
   (function drawNucleus() {
+    const nucleusR = Math.max(8, short * CFG.nucleusRatio);
+
     ctx.save();
     ctx.globalCompositeOperation = "lighter";
     ctx.globalAlpha = CFG.nucleusAlpha;
 
     const grad = ctx.createRadialGradient(cx, cy, nucleusR * 0.2, cx, cy, nucleusR * 1.15);
-    grad.addColorStop(0.00, "rgba(255,255,255,0.22)");
-    grad.addColorStop(0.35, `rgba(187,113,243,0.10)`);
+    grad.addColorStop(0.00, "rgba(255,255,255,0.30)");
+    grad.addColorStop(0.35, "rgba(187,113,243,0.14)");
     grad.addColorStop(1.00, "rgba(0,0,0,0)");
 
     ctx.fillStyle = grad;
@@ -321,99 +394,16 @@ function draw(now = 0) {
   })();
 
   // =======================
-  // Compute per-electron positions (with pseudo-z), then depth-sort
+  // Orbit guides (very subtle)
   // =======================
-  const total = electrons.length;
-  const shellCount = CFG.shells.length;
-
-  const shellBase = new Array(shellCount);
-  for (let s = 0; s < shellCount; s++) {
-    const tt = (shellCount <= 1) ? 0 : (s / (shellCount - 1));
-    shellBase[s] = lerp(rMin, rMax, tt);
-  }
-
-  // A slowly changing time for color drift
-  const tSec = now * 0.001;
-
-  const drawList = new Array(total);
-  for (let i = 0; i < total; i++) {
-    const el = electrons[i];
-
-    // Map frequency -> amplitude
-    const idx = logMapIndex(el.tFreq, dataFreq.length, CFG.freqGamma);
-    const v = dataFreq[idx] / 255; // 0..1
-    el.e = lerp(el.e, v, 0.22);
-
-    // Orbit radius + energy jitter
-    const baseR = shellBase[el.shell];
-    const r = baseR + el.e * CFG.shellGapJitter * (0.4 + 0.6 * Math.sin(el.phi + tSec * 2.1));
-
-    // Update angle: energy increases speed
-    el.a += (el.w * (1 + CFG.speedGain * el.e)) * dt;
-
-    // Ellipse in local plane
-    const ca = Math.cos(el.a);
-    const sa = Math.sin(el.a);
-    const rx = r * (1 + el.ecc);
-    const ry = r * (1 - el.ecc);
-
-    let x = ca * rx;
-    let y = sa * ry;
-
-    // Pseudo-z for depth movement
-    // Include shell plane phase for orthogonal feel
-    const zRaw = Math.sin(el.a + el.phi + el.plane.phase);
-    // normalized depth 0..1
-    const zN = clamp01((zRaw * CFG.zDepth + 1) * 0.5);
-
-    // Apply plane influence (orthogonal planes)
-    // z pushes x/y differently per shell, to mimic different orbit planes
-    x += zRaw * el.plane.px * r * 0.40;
-    y += zRaw * el.plane.py * r * 0.40;
-
-    // Perspective projection: z shifts Y and affects scale/alpha
-    const scale = lerp(CFG.zScaleMin, CFG.zScaleMax, zN);
-    const alphaZ = lerp(CFG.zAlphaMin, CFG.zAlphaMax, zN);
-
-    const X = cx + x;
-    const Y = cy + y + (zN - 0.5) * CFG.zTiltY * r * 0.75;
-
-    // ✅ More varied colors:
-    // baseHue from frequency + shell offset + slow drift + energy jitter + depth tint
-    const hueDrift =
-      22 * Math.sin(tSec * 0.9 + el.shell * 1.3) +
-      16 * Math.sin(tSec * 1.7 + el.a * 0.8) +
-      14 * (el.e - 0.5) +
-      10 * (zN - 0.5);
-
-    const hue = (el.baseHue + el.shell * 18 + hueDrift) % 360;
-
-    drawList[i] = {
-      el,
-      X, Y,
-      zN,
-      scale,
-      alphaZ,
-      hue,
-      sortZ: zN,
-    };
-  }
-
-  // Depth sort (back -> front)
-  drawList.sort((a, b) => a.sortZ - b.sortZ);
-
-  // =======================
-  // Draw orbit rings (subtle)
-  // =======================
-  (function drawOrbits() {
+  (function drawOrbitGuides() {
     ctx.save();
     ctx.globalCompositeOperation = "lighter";
-    ctx.lineWidth = givesLineWidthForOrbits();
+    ctx.lineWidth = 1.2;
 
     for (let s = 0; s < shellCount; s++) {
       const rr = shellBase[s];
-      const a = CFG.orbitLineBaseAlpha + 0.01 * s;
-      ctx.strokeStyle = `rgba(255,255,255,${a})`;
+      ctx.strokeStyle = `rgba(255,255,255,${CFG.orbitLineAlpha + 0.01 * s})`;
       ctx.beginPath();
       ctx.arc(cx, cy, rr, 0, Math.PI * 2);
       ctx.stroke();
@@ -422,25 +412,97 @@ function draw(now = 0) {
   })();
 
   // =======================
-  // Draw electrons (glow + longer tail)
+  // Compute electron positions + depth sort
+  // =======================
+  const drawList = [];
+
+  for (const el of electrons) {
+    // Band energy (smoothed)
+    const idx = logMapIndex(el.tFreq, dataFreq.length, CFG.freqGamma);
+    const v = dataFreq[idx] / 255; // 0..1
+    el.e = lerp(el.e, v, 0.20);
+
+    // ✅ Beat-coupled speed:
+    // - baseline + per-shell
+    // - amplitude -> speed
+    // - beat envelope -> big speed swing
+    const speedMul =
+      1
+      + (CFG.speedGain * el.e)
+      + (CFG.beatSpeedMul * beatEnv);
+
+    // Advance curve parameter u
+    el.u += el.w * speedMul * dt;
+
+    // Base radius for this shell + energy jitter (pulsing)
+    const baseR = shellBase[el.shell];
+    const r = baseR + (el.e * CFG.orbitJitter) * (0.35 + 0.65 * Math.sin(now * 0.001 + el.dz));
+
+    // Lissajous 8 (local)
+    const { x, y, z } = lissajous8(el.u, el.dx, el.dy, el.dz);
+
+    // Apply aspect
+    const lx = x * el.aspect;
+    const ly = y * (2.0 - el.aspect) * 0.92;
+
+    // Local point scaled by radius
+    let px = lx * r;
+    let py = ly * r;
+
+    // Pseudo-z
+    let pz = z;
+
+    // Apply shell plane tilt (fake 3D variety)
+    px += pz * el.plane.tiltX * r * 0.35;
+    py += pz * el.plane.tiltY * r * 0.35;
+
+    // Normalize z to 0..1 depth
+    const zN = (pz * CFG.zDepth + 1) * 0.5; // 0..1
+    const scale = lerp(CFG.zScaleMin, CFG.zScaleMax, zN);
+    const alphaZ = lerp(CFG.zAlphaMin, CFG.zAlphaMax, zN);
+
+    // Perspective tilt (stronger depth feel)
+    const X = cx + px;
+    const Y = cy + py + (zN - 0.5) * CFG.zTiltY * r;
+
+    drawList.push({
+      el, X, Y,
+      zN,
+      scale,
+      alphaZ,
+      sortZ: zN,
+    });
+  }
+
+  // Back -> front
+  drawList.sort((a, b) => a.sortZ - b.sortZ);
+
+  // =======================
+  // Draw electrons (glow + tail) — beat affects tail brightness/length too
   // =======================
   ctx.save();
   ctx.globalCompositeOperation = "lighter";
 
   for (const item of drawList) {
-    const { el, X, Y, zN, scale, alphaZ, hue } = item;
+    const { el, X, Y, zN, scale, alphaZ } = item;
 
-    const light = 36 + el.e * 58 + zN * 8;
-    const a = clamp01((0.14 + el.e * 0.92) * alphaZ);
+    // Frequency hue + energy lightness
+    const hue = ((el.hue % 360) + 360) % 360;
 
-    const color = `hsla(${((hue % 360) + 360) % 360}, 100%, ${light}%, ${a})`;
+    // ✅ beat adds brightness pop
+    const light = 34 + el.e * 56 + zN * 8 + beatEnv * 10;
+
+    // Base alpha
+    const a = clamp01((0.15 + el.e * 0.85 + beatEnv * 0.18) * alphaZ);
+
+    const color = `hsla(${hue}, 100%, ${light}%, ${a})`;
 
     // Glow
     ctx.shadowColor = color;
-    ctx.shadowBlur = Math.min(QoS.maxShadowBlur, 6 + el.e * CFG.glowMax + zN * 10);
+    ctx.shadowBlur = Math.min(QoS.maxShadowBlur, 6 + el.e * CFG.glowMax + beatEnv * 10 + zN * 6);
 
-    // Electron size
-    const size = (CFG.electronBaseSize + el.e * CFG.electronSizeGain) * scale;
+    // Size
+    const size = (CFG.electronBaseSize + el.e * CFG.electronSizeGain + beatEnv * 1.8) * scale;
 
     // Body
     ctx.fillStyle = color;
@@ -448,14 +510,20 @@ function draw(now = 0) {
     ctx.arc(X, Y, size, 0, Math.PI * 2);
     ctx.fill();
 
-    // Tail (tangent direction)
-    const ta = el.a;
-    const tx = -Math.sin(ta);
-    const ty =  Math.cos(ta);
+    // Tail direction: approximate tangent by small forward sample on curve
+    const u2 = el.u + 0.04;
+    const p1 = lissajous8(el.u,  el.dx, el.dy, el.dz);
+    const p2 = lissajous8(u2,    el.dx, el.dy, el.dz);
+    let tx = (p2.x - p1.x);
+    let ty = (p2.y - p1.y);
+    const len = Math.hypot(tx, ty) || 1;
+    tx /= len; ty /= len;
 
-    const tail = (CFG.tailBase + el.e * CFG.tailGain) * scale;
+    // Tail length: energy + beat + depth
+    const tail = (CFG.tailBase + el.e * CFG.tailGain + beatEnv * 36) * scale * (0.85 + 0.35 * zN);
+
     ctx.lineWidth = 2.0 * scale;
-    ctx.strokeStyle = `hsla(${((hue % 360) + 360) % 360}, 100%, ${light}%, ${clamp01(0.10 + el.e * 0.70) * alphaZ})`;
+    ctx.strokeStyle = `hsla(${hue}, 100%, ${light}%, ${clamp01(0.10 + el.e * 0.60 + beatEnv * 0.35) * alphaZ})`;
     ctx.beginPath();
     ctx.moveTo(X, Y);
     ctx.lineTo(X + tx * tail, Y + ty * tail);
@@ -465,7 +533,7 @@ function draw(now = 0) {
   ctx.restore();
 
   // =======================
-  // Progress ring (thin + dim, no glow)
+  // Progress ring (thinner & dimmer)
   // =======================
   (function drawProgress() {
     const d = audio.duration || 0;
@@ -475,25 +543,24 @@ function draw(now = 0) {
     const start = -Math.PI / 2;
     const end = start + p * Math.PI * 2;
 
-    // background
+    // background ring
     ctx.save();
     ctx.globalCompositeOperation = "source-over";
-    ctx.globalAlpha = CFG.progressBgAlpha;
-    ctx.strokeStyle = "rgba(255,255,255,1)";
+    ctx.strokeStyle = `rgba(255,255,255,${CFG.progressAlphaBg})`;
     ctx.lineWidth = CFG.progressWidthBg;
     ctx.beginPath();
     ctx.arc(cx, cy, ring, 0, Math.PI * 2);
     ctx.stroke();
     ctx.restore();
 
-    // foreground
+    // foreground ring
     ctx.save();
-    ctx.globalCompositeOperation = "source-over";
-    ctx.globalAlpha = CFG.progressFgAlpha;
-    ctx.strokeStyle = ACCENT;
+    ctx.globalCompositeOperation = "lighter";
+    ctx.strokeStyle = `rgba(187,113,243,${CFG.progressAlphaFg})`;
     ctx.lineWidth = CFG.progressWidthFg;
     ctx.lineCap = "round";
-    ctx.shadowBlur = 0; // ✅ no glow
+    ctx.shadowColor = ACCENT;
+    ctx.shadowBlur = Math.min(QoS.maxShadowBlur, CFG.progressGlow);
     ctx.beginPath();
     ctx.arc(cx, cy, ring, start, end, false);
     ctx.stroke();
@@ -501,11 +568,6 @@ function draw(now = 0) {
   })();
 
   rafId = requestAnimationFrame(draw);
-}
-
-function givesLineWidthForOrbits() {
-  // Keep it subtle and stable across DPI scaling
-  return 1.2;
 }
 
 // =======================
@@ -533,6 +595,3 @@ audio.addEventListener("play", () => {
   lastT = 0;
   draw(0);
 });
-
-audio.addEventListener("pause", () => {});
-audio.addEventListener("ended", () => {});

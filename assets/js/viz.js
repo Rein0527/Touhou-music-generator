@@ -1,11 +1,10 @@
-// Visualizer (Canvas)
-// - Center blob (semi-transparent rainbow)
-// - Ripple rings (semi-transparent, optional follow center hue)
-// - Outer spectrum bars (opaque rainbow)  ✅ NORMAL: linear magnitude mapping
-// - Progress arc ring (opaque)
-// - Kick detection + Auto QoS (without changing bar density)
-// - Stable sizing: CSS logical size via getBoundingClientRect()
-// - SAFE radii: prevent clipping/overflow
+// viz.js — 2.5D Atom Electrons Visualizer (Kr config 2,8,18,8)
+// - 36 electrons in 4 shells: 2 / 8 / 18 / 8
+// - Each electron maps to a frequency band (log-frequency mapping)
+// - Color = frequency (hue), brightness/size/trail = amplitude
+// - 2.5D depth: electrons have pseudo-z -> scale/alpha + depth sorting
+// - Stable sizing: getBoundingClientRect + DPR + QoS scale
+// - SAFE radii to avoid clipping
 
 const audio  = document.getElementById("audio");
 const canvas = document.getElementById("viz");
@@ -22,7 +21,6 @@ export function setVizEnabled(v) {
   if (!VIZ_ENABLED) {
     if (rafId) cancelAnimationFrame(rafId);
     rafId = null;
-
     try { ctx.setTransform(1,0,0,1,0,0); } catch {}
     ctx.clearRect(0, 0, canvas.width, canvas.height);
     return;
@@ -33,7 +31,7 @@ export function setVizEnabled(v) {
     if (audioCtx && audioCtx.state === "suspended") audioCtx.resume();
     if (rafId) cancelAnimationFrame(rafId);
     lastT = 0;
-    draw();
+    draw(0);
   }
 }
 
@@ -42,101 +40,88 @@ export function getVizEnabled() {
 }
 
 // =======================
-// Config (NORMAL EQ)
+// Config
 // =======================
 const CFG = {
-  // Outer bars (density fixed)
-  bins: 108,
+  // Visual
+  trailAlpha: 0.10,        // lower = longer trails
+  glowMax: 26,
+  electronBaseSize: 2.6,
+  electronSizeGain: 5.2,
+  tailBase: 10,
+  tailGain: 46,
+
+  // Shell (Kr): 2, 8, 18, 8  => 36
+  shells: [2, 8, 18, 8],
+
+  // Orbit layout (relative to safe ring radius)
+  orbitMin: 0.38,
+  orbitMax: 0.62,
+  shellGapJitter: 12,      // px jitter from energy
+  orbitEccMin: 0.10,
+  orbitEccMax: 0.28,
+
+  // 2.5D projection
+  zDepth: 0.85,            // overall depth strength
+  zTiltY: 0.32,            // perspective tilt on Y
+  zScaleMin: 0.70,
+  zScaleMax: 1.15,
+  zAlphaMin: 0.25,
+  zAlphaMax: 1.00,
+
+  // Motion
+  baseSpeed: 0.55,         // base angular speed
+  speedGain: 1.25,         // amplitude adds speed
+  shellSpeedMul: [0.75, 1.00, 1.15, 1.30], // inner slower, outer faster
+
+  // Frequency mapping
+  freqGamma: 2.0,          // log-frequency mapping exponent (>=1)
   smoothing: 0.76,
 
-  // ✅ NORMAL feel: mild bass emphasis (set 1.0 to disable)
-  bassBoost: 1.35,
+  // Center nucleus (keep a subtle nucleus glow)
+  nucleusRatio: 0.22,
+  nucleusGlow: 120,
+  nucleusAlpha: 0.20,
 
-  barBase: 26,
-  barGain: 190,
-
-  // Ring positioning
-  ringOffset: 56,
-
-  // Center blob
-  centerRatio: 0.22,
-  centerGain: 80,
-  centerBassGain: 120,
-  centerGlow: 140,
-  wavePoints: 256,
-  waveSmooth: 0.22,
-
-  // Rainbow center
-  centerRainbow: true,
-  centerHueSpeed: 40,
-  centerHueBassSwing: 25,
-  centerSat: 100,
-  centerLight: 55,
-
-  // Ripples
-  rippleFollowCenter: true,
-  rippleCount: 5,
-  rippleAmp: 60,
-  rippleSpeed: 2.2,
-  rippleGap: 30,
-  rippleAlpha: 0.85,
-
-  // Alpha controls (center + ripples)
-  alphaCenter: 0.35,
-  alphaRipples: 0.85,
+  // Progress ring
+  progressWidthBg: 12,
+  progressWidthFg: 10,
 };
 
-// Auto QoS (does NOT change bar bins)
+// Auto QoS (does not change electron count)
 const QoS = {
   minFps: 50,
   maxFps: 58,
   scale: 1.0,
   minScale: 0.70,
   maxScale: 1.20,
-  baseWavePts: CFG.wavePoints,
   maxShadowBlur: 24,
-};
-
-// Kick detection tuning
-const KICK = {
-  bandRatio: 1/6,
-  threshMul: 1.35,
-  minDelta: 0.04,
-  decay: 0.90,
-  cooldownMs: 110,
-  push: 50,
-  gainMul: 0.50,
-  rippleBoost: 0.6,
-  glowBoost: 1.1,
 };
 
 // =======================
 // Audio graph
 // =======================
 let audioCtx, analyser, srcNode;
-let dataFreq, dataTime;
+let dataFreq;
 
 // =======================
-// Render state
+// State
 // =======================
 let rafId = null;
-let phase = 0;
 let lastT = 0;
 
-let huePhase = 0;
-
-let volEnv = 0;
-let bassPeak = 0;
-const ATTACK = 0.45;
-const RELEASE = 0.1;
-const PEAK_DECAY = 0.93;
-
-let kickEnv = 0;
-let bassMeanLT = 0;
-let lastKickT = 0;
-
-// FPS tracker
+let __cssW = 0, __cssH = 0;
 let __fps_t = 0, __fps_frames = 0, __fps_val = 60;
+
+// electrons array
+let electrons = null;
+
+// =======================
+// Utilities
+// =======================
+function lerp(a, b, t) { return a + (b - a) * t; }
+function clamp01(x) { return Math.max(0, Math.min(1, x)); }
+
 function trackFPS(now){
   if (!__fps_t) __fps_t = now;
   __fps_frames++;
@@ -150,23 +135,17 @@ function trackFPS(now){
   }
 }
 
-// Angle LUT
-let __angleLUT = null;
-function ensureAngleLUT(bins) {
-  if (!__angleLUT || __angleLUT.length !== bins) {
-    __angleLUT = new Array(bins);
-    for (let i = 0; i < bins; i++) {
-      const a = (i / bins) * Math.PI * 2;
-      __angleLUT[i] = { c: Math.cos(a), s: Math.sin(a) };
-    }
-  }
+// log-frequency mapping (power-law approximation)
+function logMapIndex(t, n, gamma) {
+  const tt = clamp01(t);
+  const g = Math.max(1.0001, Number(gamma) || 2.0);
+  const idx = Math.floor(Math.pow(tt, g) * (n - 1));
+  return Math.max(0, Math.min(n - 1, idx));
 }
 
 // =======================
-// Canvas sizing (CSS logical size -> device pixels)
+// Canvas sizing
 // =======================
-let __cssW = 0, __cssH = 0;
-
 function resizeCanvasToDisplaySize() {
   const rect = canvas.getBoundingClientRect();
   const cssW = Math.max(1, Math.round(rect.width));
@@ -202,54 +181,64 @@ function ensureAudioGraph() {
   analyser.connect(audioCtx.destination);
 
   dataFreq = new Uint8Array(analyser.frequencyBinCount);
-  dataTime = new Uint8Array(analyser.frequencyBinCount);
 
   resizeCanvasToDisplaySize();
 }
 
 // =======================
-// Helpers
+// Electrons init (Kr shells)
 // =======================
-function computeLevels(arr) {
-  let sum = 0;
-  for (let i = 0; i < arr.length; i++) sum += arr[i];
-  const avg = (sum / (arr.length * 255)) || 0;
-
-  const lowEnd = Math.max(8, Math.floor(arr.length / 6));
-  let bsum = 0;
-  for (let i = 0; i < lowEnd; i++) bsum += arr[i];
-  const bass = (bsum / (lowEnd * 255)) || 0;
-
-  return { avg, bass };
-}
-
-function smoothArray(a, k = 0.2) {
-  if (!k) return a;
-  const out = new Float32Array(a.length);
-  let prev = a[0];
-  for (let i = 0; i < a.length; i++) {
-    prev = prev + (a[i] - prev) * (1 - Math.pow(1 - k, 2));
-    out[i] = prev;
+function initElectrons() {
+  const shells = CFG.shells.slice();
+  const total = shells.reduce((a,b)=>a+b, 0);
+  if (total !== 36) {
+    // still proceed, but your config expected 36
+    console.warn("Electron total != 36:", total);
   }
-  return out;
-}
 
-function lerp(a, b, t) { return a + (b - a) * t; }
+  electrons = [];
+  let globalIndex = 0;
 
-function hexToRgba(c, a = 1) {
-  const s = String(c || "").trim();
-  if (s.startsWith("#")) {
-    let r, g, b;
-    if (s.length === 7) { r = parseInt(s.slice(1,3),16); g = parseInt(s.slice(3,5),16); b = parseInt(s.slice(5,7),16); }
-    else if (s.length === 4) { r = parseInt(s[1]+s[1],16); g = parseInt(s[2]+s[2],16); b = parseInt(s[3]+s[3],16); }
-    else return s;
-    return `rgba(${r},${g},${b},${a})`;
+  for (let s = 0; s < shells.length; s++) {
+    const count = shells[s];
+
+    // Each shell has its own orbital plane tilt / phase (fake 3D variety)
+    const plane = {
+      tiltX: (Math.random() * 0.6 - 0.3),
+      tiltY: (Math.random() * 0.6 - 0.3),
+      phi: Math.random() * Math.PI * 2,
+    };
+
+    for (let j = 0; j < count; j++) {
+      const t = (total <= 1) ? 0 : (globalIndex / (total - 1)); // 0..1 low->high
+      const hue = 260 - 240 * t; // low freq purple -> high freq green/yellow
+
+      electrons.push({
+        shell: s,
+        j,
+        tFreq: t,
+        hue,
+        // angle spread evenly but with per-shell offset
+        a: (j / count) * Math.PI * 2 + Math.random() * 0.25,
+        // base angular velocity
+        w: CFG.baseSpeed * (CFG.shellSpeedMul[s] ?? 1.0) * (0.85 + 0.30 * Math.random()),
+        // ellipse eccentricity
+        ecc: lerp(CFG.orbitEccMin, CFG.orbitEccMax, Math.random()),
+        // per-electron phase for depth
+        phi: Math.random() * Math.PI * 2,
+        // plane
+        plane,
+        // smoothed energy
+        e: 0,
+      });
+
+      globalIndex++;
+    }
   }
-  return s;
 }
 
 // =======================
-// Main draw
+// Drawing
 // =======================
 function draw(now = 0) {
   if (!VIZ_ENABLED) return;
@@ -259,241 +248,240 @@ function draw(now = 0) {
 
   const W = __cssW || Math.round(canvas.getBoundingClientRect().width) || 1;
   const H = __cssH || Math.round(canvas.getBoundingClientRect().height) || 1;
-
   resizeCanvasToDisplaySize();
 
   const cx = W / 2, cy = H / 2;
   const short = Math.min(W, H);
-
-  const bins = CFG.bins;
-  ensureAngleLUT(bins);
-
-  const N = Math.max(120, Math.round(QoS.baseWavePts * QoS.scale));
+  const half = short / 2;
 
   const dt = lastT ? (now - lastT) / 1000 : 0;
   lastT = now;
-  phase += dt * CFG.rippleSpeed;
 
   analyser.getByteFrequencyData(dataFreq);
-  analyser.getByteTimeDomainData(dataTime);
-  const { avg, bass } = computeLevels(dataFreq);
 
-  // ---- Kick detection ----
-  const totalBins = dataFreq.length;
-  const lowEndKick = Math.max(8, Math.floor(totalBins * KICK.bandRatio));
-  let lowSum = 0;
-  for (let i = 0; i < lowEndKick; i++) lowSum += dataFreq[i] / 255;
-  const bassShort = (lowSum / lowEndKick) || 0;
+  // Ensure electrons
+  if (!electrons) initElectrons();
 
-  const EMA = 0.02;
-  bassMeanLT = (1 - EMA) * bassMeanLT + EMA * bassShort;
+  // Accent
+  const ACCENT = getComputedStyle(document.documentElement).getPropertyValue("--accent").trim() || "#bb71f3";
 
-  const nowMs = performance.now();
-  const canKick = (nowMs - lastKickT) > KICK.cooldownMs;
-  const overThresh = bassShort > (bassMeanLT * KICK.threshMul);
-  const diffOk = (bassShort - bassMeanLT) > KICK.minDelta;
-  if (canKick && overThresh && diffOk) { kickEnv = 1; lastKickT = nowMs; }
-  else { kickEnv *= KICK.decay; }
-
-  // ---- Volume envelope ----
-  const targetVol = Math.min(1, avg * 0.9 + bass * 0.8);
-  const k = (targetVol > volEnv) ? ATTACK : RELEASE;
-  volEnv = lerp(volEnv, targetVol, k);
-
-  if (bass > bassPeak) bassPeak = bass;
-  else bassPeak *= PEAK_DECAY;
-
-  // ---- Center hue ----
-  if (CFG.centerRainbow) {
-    const speed = CFG.centerHueSpeed * (1 + 0.6 * bassPeak);
-    huePhase = (huePhase + speed * dt) % 360;
-  }
-
-  ctx.clearRect(0, 0, W, H);
-
-  const ACCENT = getComputedStyle(document.documentElement).getPropertyValue("--accent").trim() || "#6da8ff";
+  // ----- TRAIL: fade previous frame slightly (glowy motion)
+  ctx.save();
+  ctx.globalCompositeOperation = "source-over";
+  ctx.fillStyle = `rgba(0,0,0,${CFG.trailAlpha})`;
+  ctx.fillRect(0, 0, W, H);
+  ctx.restore();
 
   // ==============================
-  // SAFE radius calculation (no clipping)
+  // SAFE radii (avoid clipping)
   // ==============================
-  const half = short / 2;
-  const maxBar = CFG.barBase + CFG.barGain;
-
-  const progressPad = 18;
-  const barPad = 10;
+  const progressPad = 16;
+  const electronPad = 20;
   const shadowPad = Math.min(24, QoS.maxShadowBlur);
-  const edgePad = progressPad + barPad + shadowPad + 8;
+  const edgePad = progressPad + electronPad + shadowPad + 8;
 
-  const ring = Math.max(10, half - edgePad);
+  const ring = Math.max(12, half - edgePad);
 
-  let radius = ring - CFG.ringOffset;
-  radius = Math.max(10, Math.min(radius, (half - edgePad) - maxBar));
-  if (!isFinite(radius) || radius < 10) radius = Math.max(10, ring * 0.6);
+  // Shell radii (inside ring)
+  const rMin = ring * CFG.orbitMin;
+  const rMax = ring * CFG.orbitMax;
+
+  // Nucleus
+  const nucleusR = Math.max(8, short * CFG.nucleusRatio);
 
   // =======================
-  // Center blob
+  // Nucleus glow (subtle)
   // =======================
-  (function drawCenterBlob() {
-    const wave = new Float32Array(dataTime.length);
-    for (let i = 0; i < dataTime.length; i++) wave[i] = (dataTime[i] - 128) / 128;
-    const sm = smoothArray(wave, CFG.waveSmooth);
-
-    const base = short * CFG.centerRatio;
-    const beat = Math.min(1.4, 0.6 * volEnv + 1.2 * bassPeak);
-
-    const gain = CFG.centerGain * (beat + KICK.gainMul * kickEnv);
-    const bassPush = CFG.centerBassGain * (0.55 * bass + 0.45 * bassPeak) + (KICK.push * kickEnv);
-
-    const step = sm.length / N;
-
-    const baseHue = CFG.centerRainbow ? (huePhase + CFG.centerHueBassSwing * bassPeak) % 360 : 210;
-    const hue = (baseHue + 180) % 360;
-
-    const centerStroke = `hsl(${hue}, ${CFG.centerSat}%, ${CFG.centerLight + 5}%)`;
-    const centerFill   = `hsla(${hue}, ${CFG.centerSat}%, ${CFG.centerLight}%, 0.85)`;
-    const centerGlow   = `hsl(${hue}, ${CFG.centerSat}%, ${Math.min(70, CFG.centerLight + 15)}%)`;
-
+  (function drawNucleus() {
     ctx.save();
     ctx.globalCompositeOperation = "lighter";
-    ctx.globalAlpha = CFG.alphaCenter;
+    ctx.globalAlpha = CFG.nucleusAlpha;
 
-    ctx.shadowColor = centerGlow;
-    ctx.shadowBlur = Math.min(
-      (CFG.centerGlow * (0.5 + volEnv)) * (1 + KICK.glowBoost * kickEnv * 0.5),
-      QoS.maxShadowBlur
-    );
-
-    const grad = ctx.createRadialGradient(cx, cy, base * 0.18, cx, cy, base + gain + bassPush + 20);
-    grad.addColorStop(0.00, "rgba(255,255,255,0.40)");
-    grad.addColorStop(0.25, centerFill);
+    const grad = ctx.createRadialGradient(cx, cy, nucleusR * 0.2, cx, cy, nucleusR * 1.35);
+    grad.addColorStop(0.00, "rgba(255,255,255,0.35)");
+    grad.addColorStop(0.35, `rgba(187,113,243,0.22)`);
     grad.addColorStop(1.00, "rgba(0,0,0,0)");
+
     ctx.fillStyle = grad;
+    ctx.shadowColor = ACCENT;
+    ctx.shadowBlur = Math.min(QoS.maxShadowBlur, CFG.nucleusGlow);
 
     ctx.beginPath();
-    for (let i = 0; i < N; i++) {
-      const a = (i / N) * Math.PI * 2;
-      const idx = Math.floor((i * step + phase * 70) % sm.length);
-      const w = sm[idx];
-      const r = base + w * gain + bassPush;
-      const x = cx + Math.cos(a) * r;
-      const y = cy + Math.sin(a) * r;
-      if (i === 0) ctx.moveTo(x, y);
-      else ctx.lineTo(x, y);
-    }
-    ctx.closePath();
+    ctx.arc(cx, cy, nucleusR, 0, Math.PI * 2);
     ctx.fill();
 
-    ctx.strokeStyle = centerStroke;
-    ctx.lineWidth = 2.4 + volEnv * 1.8;
+    ctx.restore();
+  })();
+
+  // =======================
+  // Compute per-electron positions (with pseudo-z), then depth-sort
+  // =======================
+  const total = electrons.length;
+  const shells = CFG.shells;
+  const shellCount = shells.length;
+
+  // Precompute shell base radii
+  const shellBase = new Array(shellCount);
+  for (let s = 0; s < shellCount; s++) {
+    const tt = (shellCount <= 1) ? 0 : (s / (shellCount - 1));
+    shellBase[s] = lerp(rMin, rMax, tt);
+  }
+
+  // Update energies and positions
+  const drawList = new Array(total);
+  for (let i = 0; i < total; i++) {
+    const el = electrons[i];
+
+    // Map frequency -> amplitude
+    const idx = logMapIndex(el.tFreq, dataFreq.length, CFG.freqGamma);
+    const v = dataFreq[idx] / 255; // 0..1
+    el.e = lerp(el.e, v, 0.22);
+
+    // Orbit radius + energy jitter
+    const baseR = shellBase[el.shell];
+    const r = baseR + el.e * CFG.shellGapJitter * (0.5 + 0.5 * Math.sin(el.phi + now * 0.001));
+
+    // Update angle: energy increases speed a bit
+    el.a += (el.w * (1 + CFG.speedGain * el.e)) * dt;
+
+    // Ellipse in local plane
+    const ca = Math.cos(el.a);
+    const sa = Math.sin(el.a);
+    const rx = r * (1 + el.ecc);
+    const ry = r * (1 - el.ecc);
+
+    // Local 3D-ish point
+    let x = ca * rx;
+    let y = sa * ry;
+
+    // Pseudo-z uses phase + angle for depth movement
+    let z = Math.sin(el.a + el.phi);
+
+    // Apply shell plane tilt (fake 3D: rotate a bit)
+    const px = el.plane.tiltX;
+    const py = el.plane.tiltY;
+    // tilt affects how much z influences x/y
+    x += z * px * r * 0.25;
+    y += z * py * r * 0.25;
+
+    // Project 2.5D: z shifts y + affects scale/alpha
+    const zN = (z * CFG.zDepth + 1) * 0.5; // 0..1
+    const scale = lerp(CFG.zScaleMin, CFG.zScaleMax, zN);
+    const alphaZ = lerp(CFG.zAlphaMin, CFG.zAlphaMax, zN);
+
+    const X = cx + x;
+    const Y = cy + y + (zN - 0.5) * CFG.zTiltY * r * 0.55;
+
+    drawList[i] = {
+      el,
+      X, Y,
+      zN,
+      scale,
+      alphaZ,
+      // sort key: back first
+      sortZ: zN,
+    };
+  }
+
+  // Depth sort (back -> front)
+  drawList.sort((a, b) => a.sortZ - b.sortZ);
+
+  // =======================
+  // Draw orbit rings (subtle)
+  // =======================
+  (function drawOrbits() {
+    ctx.save();
+    ctx.globalCompositeOperation = "lighter";
+    ctx.lineWidth = 1.4;
+
+    for (let s = 0; s < shellCount; s++) {
+      const rr = shellBase[s];
+      ctx.strokeStyle = `rgba(255,255,255,${0.05 + 0.03 * s})`;
+      ctx.beginPath();
+      ctx.arc(cx, cy, rr, 0, Math.PI * 2);
+      ctx.stroke();
+    }
+    ctx.restore();
+  })();
+
+  // =======================
+  // Draw electrons (glow + tail)
+  // =======================
+  ctx.save();
+  ctx.globalCompositeOperation = "lighter";
+
+  for (const item of drawList) {
+    const { el, X, Y, zN, scale, alphaZ } = item;
+
+    // Color: frequency hue, amplitude controls brightness
+    const hue = ((el.hue % 360) + 360) % 360;
+    const light = 38 + el.e * 55 + zN * 6;
+    const a = clamp01((0.18 + el.e * 0.85) * alphaZ);
+
+    const color = `hsla(${hue}, 100%, ${light}%, ${a})`;
+
+    // Glow
+    ctx.shadowColor = color;
+    ctx.shadowBlur = Math.min(QoS.maxShadowBlur, 8 + el.e * CFG.glowMax + zN * 6);
+
+    // Electron size
+    const size = (CFG.electronBaseSize + el.e * CFG.electronSizeGain) * scale;
+
+    // Body
+    ctx.fillStyle = color;
+    ctx.beginPath();
+    ctx.arc(X, Y, size, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Tail (tangent direction in screen space)
+    // Approx tangent by angle derivative: (-sin, cos) in local orbit
+    const ta = el.a;
+    const tx = -Math.sin(ta);
+    const ty =  Math.cos(ta);
+
+    const tail = (CFG.tailBase + el.e * CFG.tailGain) * scale;
+    ctx.lineWidth = 2.0 * scale;
+    ctx.strokeStyle = `hsla(${hue}, 100%, ${light}%, ${clamp01(0.10 + el.e * 0.65) * alphaZ})`;
+    ctx.beginPath();
+    ctx.moveTo(X, Y);
+    ctx.lineTo(X + tx * tail, Y + ty * tail);
     ctx.stroke();
+  }
 
-    ctx.restore();
-  })();
-
-  // =======================
-  // Ripples
-  // =======================
-  (function drawRipples() {
-    ctx.save();
-    ctx.globalCompositeOperation = "lighter";
-
-    const hue = CFG.centerRainbow ? (huePhase + 10) % 360 : null;
-    const rippleColor = (CFG.rippleFollowCenter && CFG.centerRainbow)
-      ? `hsla(${hue}, ${CFG.centerSat}%, ${CFG.centerLight + 10}%, 0.9)`
-      : hexToRgba(ACCENT, 0.9);
-
-    ctx.strokeStyle = rippleColor;
-    ctx.lineWidth = 2.2;
-
-    for (let i = 0; i < CFG.rippleCount; i++) {
-      const baseR = (short * CFG.centerRatio) + i * CFG.rippleGap;
-      const amp   = CFG.rippleAmp * (0.35 + volEnv * 0.65) * (1 + KICK.rippleBoost * kickEnv);
-      const r = baseR + Math.sin(phase * (1 + i * 0.06) + i * 0.9) * amp;
-
-      const dyn = CFG.rippleAlpha * (0.95 - i / (CFG.rippleCount + 1)) * (0.6 + 0.4 * (volEnv + bassPeak));
-      ctx.globalAlpha = CFG.alphaRipples * dyn;
-
-      ctx.beginPath();
-      ctx.arc(cx, cy, r, 0, Math.PI * 2);
-      ctx.stroke();
-    }
-    ctx.restore();
-  })();
+  ctx.restore();
 
   // =======================
-  // Outer rainbow bars (NORMAL: linear mapping)
-  // =======================
-  (function drawBars() {
-    const n = dataFreq.length;
-    const step = n / bins;
-
-    ctx.save();
-    ctx.globalCompositeOperation = "lighter";
-    ctx.globalAlpha = 1;
-
-    for (let i = 0; i < bins; i++) {
-      // linear FFT index sampling
-      const fftIndex = Math.min(n - 1, Math.floor(i * step));
-      const v = dataFreq[fftIndex] / 255; // 0..1
-
-      // mild bass emphasis (optional)
-      const lowWeight = Math.pow(1 - i / bins, 2) * (CFG.bassBoost - 1) + 1;
-      const boosted = Math.min(1, v * lowWeight);
-
-      const bar = CFG.barBase + boosted * CFG.barGain;
-
-      const ang = __angleLUT[i];
-      const x1 = cx + ang.c * radius;
-      const y1 = cy + ang.s * radius;
-      const x2 = cx + ang.c * (radius + bar);
-      const y2 = cy + ang.s * (radius + bar);
-
-      const hue = (i / bins) * 360;
-      const light = 44 + boosted * 42;
-      const color = `hsl(${hue}, 100%, ${light}%)`;
-
-      ctx.strokeStyle = color;
-      ctx.lineWidth = 3.0;
-      ctx.shadowColor = color;
-      ctx.shadowBlur = Math.min(6 + boosted * 30, QoS.maxShadowBlur);
-
-      ctx.beginPath();
-      ctx.moveTo(x1, y1);
-      ctx.lineTo(x2, y2);
-      ctx.stroke();
-    }
-
-    ctx.restore();
-  })();
-
-  // =======================
-  // Progress arc ring (SAFE)
+  // Progress ring (safe)
   // =======================
   (function drawProgress() {
     const d = audio.duration || 0;
     const ct = audio.currentTime || 0;
     const p = d > 0 ? (ct / d) : 0;
 
-    const s = -Math.PI / 2;
-    const e = s + p * Math.PI * 2;
+    const start = -Math.PI / 2;
+    const end = start + p * Math.PI * 2;
 
+    // background ring
     ctx.save();
-    ctx.strokeStyle = "rgba(255,255,255,0.25)";
-    ctx.lineWidth = 14;
+    ctx.globalCompositeOperation = "source-over";
+    ctx.strokeStyle = "rgba(255,255,255,0.22)";
+    ctx.lineWidth = CFG.progressWidthBg;
     ctx.beginPath();
     ctx.arc(cx, cy, ring, 0, Math.PI * 2);
     ctx.stroke();
     ctx.restore();
 
+    // foreground ring
     ctx.save();
+    ctx.globalCompositeOperation = "lighter";
     ctx.strokeStyle = ACCENT;
-    ctx.lineWidth = 12;
+    ctx.lineWidth = CFG.progressWidthFg;
     ctx.lineCap = "round";
     ctx.shadowColor = ACCENT;
-    ctx.shadowBlur = Math.min(25, QoS.maxShadowBlur);
+    ctx.shadowBlur = Math.min(QoS.maxShadowBlur, 18);
     ctx.globalAlpha = 0.95;
     ctx.beginPath();
-    ctx.arc(cx, cy, ring, s, e, false);
+    ctx.arc(cx, cy, ring, start, end, false);
     ctx.stroke();
     ctx.restore();
   })();
@@ -524,5 +512,13 @@ audio.addEventListener("play", () => {
   if (audioCtx && audioCtx.state === "suspended") audioCtx.resume();
   if (rafId) cancelAnimationFrame(rafId);
   lastT = 0;
-  draw();
+  draw(0);
+});
+
+audio.addEventListener("pause", () => {
+  // keep last frame trails; no special action
+});
+
+audio.addEventListener("ended", () => {
+  // keep last frame trails; no special action
 });

@@ -1,21 +1,19 @@
-// viz.js — 2.5D Quantum Orbital Visualizer (p-orbital "8")
-// Features:
-// - 36 electrons in 4 shells: 2 / 8 / 18 / 8
-// - Path: Lissajous figure-eight (p-orbital vibe)
-// - Beat coupling: vibration / uncertainty (NOT speed)
-// - Beat orbital splitting: dual "8" lobes (two phase-shifted curves) that separate on beats
-// - Probability cloud: each electron rendered as a small Gaussian-ish cloud (multiple samples)
-// - Stronger 2.5D depth: pseudo-z affects scale/alpha; depth sorting
-// - Softer nucleus; thinner/dimmer progress ring
-// - Stable sizing: getBoundingClientRect + DPR clamp
+// Visualizer (Canvas)
+// - Center blob (semi-transparent rainbow)
+// - Ripple rings (semi-transparent, optional follow center hue)
+// - Outer spectrum bars (opaque rainbow)  ✅ NORMAL: linear magnitude mapping
+// - Progress arc ring (opaque)
+// - Kick detection + Auto QoS (without changing bar density)
+// - Stable sizing: CSS logical size via getBoundingClientRect()
+// - SAFE radii: prevent clipping/overflow
 
 const audio  = document.getElementById("audio");
 const canvas = document.getElementById("viz");
 const ctx    = canvas.getContext("2d");
 
-/* =======================
-   Public toggle API
-======================= */
+// =======================
+// Public toggle API
+// =======================
 export let VIZ_ENABLED = false;
 
 export function setVizEnabled(v) {
@@ -24,6 +22,7 @@ export function setVizEnabled(v) {
   if (!VIZ_ENABLED) {
     if (rafId) cancelAnimationFrame(rafId);
     rafId = null;
+
     try { ctx.setTransform(1,0,0,1,0,0); } catch {}
     ctx.clearRect(0, 0, canvas.width, canvas.height);
     return;
@@ -34,7 +33,7 @@ export function setVizEnabled(v) {
     if (audioCtx && audioCtx.state === "suspended") audioCtx.resume();
     if (rafId) cancelAnimationFrame(rafId);
     lastT = 0;
-    draw(0);
+    draw();
   }
 }
 
@@ -42,162 +41,152 @@ export function getVizEnabled() {
   return VIZ_ENABLED;
 }
 
-/* =======================
-   Config
-======================= */
+// =======================
+// Config (NORMAL EQ)
+// =======================
 const CFG = {
-  // Shells: Kr distribution => 36
-  shells: [2, 8, 18, 8],
+  // Outer bars (density fixed)
+  bins: 108,
+  smoothing: 0.76,
 
-  // Audio mapping
-  smoothing: 0.78,
-  freqGamma: 2.1,            // log-frequency mapping exponent
+  // ✅ NORMAL feel: mild bass emphasis (set 1.0 to disable)
+  bassBoost: 1.35,
 
-  // Trails (motion persistence)
-  trailAlpha: 0.12,          // higher = shorter trails (cleaner)
-  bgFade: "rgba(0,0,0,",     // fade layer prefix
+  barBase: 26,
+  barGain: 190,
 
-  // Motion (speed is stable, NOT beat-coupled)
-  baseSpeed: 0.78,
-  shellSpeedMul: [0.85, 1.0, 1.12, 1.28], // gentle differences by shell
+  // Ring positioning
+  ringOffset: 56,
 
-  // Lissajous "8" curve
-  lissaA: 1,
-  lissaB: 2,
-  lissaAspectBase: 0.90,
-  lissaAspectJitter: 0.18,
+  // Center blob
+  centerRatio: 0.22,
+  centerGain: 80,
+  centerBassGain: 120,
+  centerGlow: 140,
+  wavePoints: 256,
+  waveSmooth: 0.22,
 
-  // Orbit radii
-  orbitMin: 0.34,
-  orbitMax: 0.60,
+  // Rainbow center
+  centerRainbow: true,
+  centerHueSpeed: 40,
+  centerHueBassSwing: 25,
+  centerSat: 100,
+  centerLight: 55,
 
-  // Beat-driven vibration (core requirement)
-  vibRadial: 28,             // radial vibration strength (px)
-  vibTangential: 18,         // tangential jitter strength (px)
-  vibZ: 0.45,                // z wobble strength
-  vibNoise: 0.55,            // per-electron noisy wobble mix
+  // Ripples
+  rippleFollowCenter: true,
+  rippleCount: 5,
+  rippleAmp: 60,
+  rippleSpeed: 2.2,
+  rippleGap: 30,
+  rippleAlpha: 0.85,
 
-  // Orbital splitting (double "8")
-  splitStrength: 0.75,       // how far the second orbital shifts (0..1)
-  splitPhase: Math.PI / 2,   // phase offset between the two "8" curves
-  splitMixBase: 0.0,         // baseline split visibility (0 for off when no beat)
-  splitMixGain: 1.0,         // beat controls additional visibility
-
-  // Probability cloud (uncertainty)
-  cloudSamples: 7,           // number of "probability samples" per electron
-  cloudSpread: 6.5,          // base spread (px)
-  cloudBeatGain: 16.0,       // beat increases spread (uncertainty "thickness")
-  cloudEnergyGain: 10.0,     // amplitude increases spread
-  cloudAlpha: 0.16,          // per-sample alpha (lower = softer)
-  cloudKernel: [1.0, 0.55, 0.33, 0.22, 0.18, 0.14, 0.12], // weights for samples
-
-  // Electron appearance
-  electronBaseSize: 2.2,
-  electronSizeGain: 4.8,
-  glowMax: 20,
-  tailBase: 10,
-  tailGain: 38,
-
-  // 2.5D depth (stronger)
-  zDepth: 1.25,
-  zTiltY: 0.52,
-  zScaleMin: 0.60,
-  zScaleMax: 1.34,
-  zAlphaMin: 0.18,
-  zAlphaMax: 1.00,
-
-  // Nucleus (reduced)
-  nucleusRatio: 0.16,
-  nucleusAlpha: 0.11,
-  nucleusGlow: 52,
-
-  // Orbit guide
-  orbitLineAlpha: 0.05,
-
-  // Progress ring (thin/dim)
-  progressAlphaBg: 0.10,
-  progressAlphaFg: 0.50,
-  progressWidthBg: 6,
-  progressWidthFg: 4,
-  progressGlow: 10,
+  // Alpha controls (center + ripples)
+  alphaCenter: 0.35,
+  alphaRipples: 0.85,
 };
 
-// QoS-ish DPR clamp
-const RENDER = {
-  maxDpr: 1.6,
-  minDpr: 1.0,
+// Auto QoS (does NOT change bar bins)
+const QoS = {
+  minFps: 50,
+  maxFps: 58,
+  scale: 1.0,
+  minScale: 0.70,
+  maxScale: 1.20,
+  baseWavePts: CFG.wavePoints,
+  maxShadowBlur: 24,
 };
 
-/* =======================
-   Audio graph
-======================= */
+// Kick detection tuning
+const KICK = {
+  bandRatio: 1/6,
+  threshMul: 1.35,
+  minDelta: 0.04,
+  decay: 0.90,
+  cooldownMs: 110,
+  push: 50,
+  gainMul: 0.50,
+  rippleBoost: 0.6,
+  glowBoost: 1.1,
+};
+
+// =======================
+// Audio graph
+// =======================
 let audioCtx, analyser, srcNode;
-let dataFreq;
+let dataFreq, dataTime;
 
-/* =======================
-   State
-======================= */
+// =======================
+// Render state
+// =======================
 let rafId = null;
+let phase = 0;
 let lastT = 0;
 
+let huePhase = 0;
+
+let volEnv = 0;
+let bassPeak = 0;
+const ATTACK = 0.45;
+const RELEASE = 0.1;
+const PEAK_DECAY = 0.93;
+
+let kickEnv = 0;
+let bassMeanLT = 0;
+let lastKickT = 0;
+
+// FPS tracker
+let __fps_t = 0, __fps_frames = 0, __fps_val = 60;
+function trackFPS(now){
+  if (!__fps_t) __fps_t = now;
+  __fps_frames++;
+  const dt = now - __fps_t;
+  if (dt >= 500){
+    __fps_val = (__fps_frames * 1000) / dt;
+    __fps_frames = 0;
+    __fps_t = now;
+    if (__fps_val < QoS.minFps) QoS.scale = Math.max(QoS.minScale, QoS.scale - 0.05);
+    else if (__fps_val > QoS.maxFps) QoS.scale = Math.min(QoS.maxScale, QoS.scale + 0.05);
+  }
+}
+
+// Angle LUT
+let __angleLUT = null;
+function ensureAngleLUT(bins) {
+  if (!__angleLUT || __angleLUT.length !== bins) {
+    __angleLUT = new Array(bins);
+    for (let i = 0; i < bins; i++) {
+      const a = (i / bins) * Math.PI * 2;
+      __angleLUT[i] = { c: Math.cos(a), s: Math.sin(a) };
+    }
+  }
+}
+
+// =======================
+// Canvas sizing (CSS logical size -> device pixels)
+// =======================
 let __cssW = 0, __cssH = 0;
 
-let electrons = null;
-
-// beat envelopes
-let volEnv = 0;
-let bassEnv = 0;
-let beatEnv = 0;
-
-/* =======================
-   Utils
-======================= */
-function lerp(a,b,t){ return a + (b-a) * t; }
-function clamp01(x){ return Math.max(0, Math.min(1, x)); }
-
-function logMapIndex(t, n, gamma) {
-  const tt = clamp01(t);
-  const g = Math.max(1.0001, Number(gamma) || 2.0);
-  const idx = Math.floor(Math.pow(tt, g) * (n - 1));
-  return Math.max(0, Math.min(n - 1, idx));
-}
-
-// small deterministic-ish hash noise (0..1)
-function hash01(x){
-  const s = Math.sin(x * 12.9898 + 78.233) * 43758.5453;
-  return s - Math.floor(s);
-}
-
-// approx gaussian from 2 uniforms
-function gauss01(seedA, seedB){
-  // Box-Muller-ish but cheaper: sum of uniforms ~ gaussian
-  const u1 = hash01(seedA);
-  const u2 = hash01(seedB);
-  return (u1 + u2 - 1); // ~[-1,1] bell-ish
-}
-
-/* =======================
-   Sizing
-======================= */
 function resizeCanvasToDisplaySize() {
   const rect = canvas.getBoundingClientRect();
   const cssW = Math.max(1, Math.round(rect.width));
   const cssH = Math.max(1, Math.round(rect.height));
   __cssW = cssW; __cssH = cssH;
 
-  const raw = window.devicePixelRatio || 1;
-  const dpr = Math.max(RENDER.minDpr, Math.min(RENDER.maxDpr, raw));
+  const rawDpr = window.devicePixelRatio || 1;
+  const dpr = Math.max(1, Math.min(1.6, rawDpr));
+  const scale = dpr * QoS.scale;
 
-  const needW = Math.floor(cssW * dpr);
-  const needH = Math.floor(cssH * dpr);
+  const needW = Math.floor(cssW * scale);
+  const needH = Math.floor(cssH * scale);
 
   if (canvas.width !== needW || canvas.height !== needH) {
     canvas.width = needW;
     canvas.height = needH;
   }
 
-  // draw in CSS pixels
-  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  // draw in CSS logical pixels
+  ctx.setTransform(scale, 0, 0, scale, 0, 0);
 }
 
 function ensureAudioGraph() {
@@ -213,356 +202,274 @@ function ensureAudioGraph() {
   analyser.connect(audioCtx.destination);
 
   dataFreq = new Uint8Array(analyser.frequencyBinCount);
+  dataTime = new Uint8Array(analyser.frequencyBinCount);
 
   resizeCanvasToDisplaySize();
 }
 
-/* =======================
-   Energy & beat envelope
-======================= */
-function computeEnergy() {
-  // overall avg
+// =======================
+// Helpers
+// =======================
+function computeLevels(arr) {
   let sum = 0;
-  for (let i = 0; i < dataFreq.length; i++) sum += dataFreq[i];
-  const avg = (sum / (dataFreq.length * 255)) || 0;
+  for (let i = 0; i < arr.length; i++) sum += arr[i];
+  const avg = (sum / (arr.length * 255)) || 0;
 
-  // bass avg
-  const lowEnd = Math.max(8, Math.floor(dataFreq.length / 7));
+  const lowEnd = Math.max(8, Math.floor(arr.length / 6));
   let bsum = 0;
-  for (let i = 0; i < lowEnd; i++) bsum += dataFreq[i];
+  for (let i = 0; i < lowEnd; i++) bsum += arr[i];
   const bass = (bsum / (lowEnd * 255)) || 0;
-
-  // envelope (fast attack, slow-ish release)
-  const ATT = 0.35;
-  const REL = 0.10;
-
-  const volTarget  = clamp01(avg * 0.95 + bass * 0.45);
-  const bassTarget = clamp01(bass * 1.25);
-
-  volEnv  = lerp(volEnv,  volTarget,  volTarget  > volEnv  ? ATT : REL);
-  bassEnv = lerp(bassEnv, bassTarget, bassTarget > bassEnv ? ATT : REL);
-
-  // beat emphasis: mostly bass, some overall
-  const beatTarget = clamp01(bassEnv * 0.90 + volEnv * 0.30);
-  beatEnv = lerp(beatEnv, beatTarget, beatTarget > beatEnv ? 0.40 : 0.14);
 
   return { avg, bass };
 }
 
-/* =======================
-   Electrons init
-======================= */
-function initElectrons() {
-  const shells = CFG.shells.slice();
-  const total = shells.reduce((a,b)=>a+b, 0);
-
-  electrons = [];
-  let g = 0;
-
-  for (let s = 0; s < shells.length; s++) {
-    const count = shells[s];
-
-    const tiltBase = 0.10 + 0.12 * s;
-    const plane = {
-      tiltX: (Math.random() * 2 - 1) * tiltBase,
-      tiltY: (Math.random() * 2 - 1) * tiltBase,
-      phi: Math.random() * Math.PI * 2,
-    };
-
-    for (let j = 0; j < count; j++) {
-      const t = (total <= 1) ? 0 : (g / (total - 1));
-      const hue = 260 - 240 * t;
-
-      electrons.push({
-        shell: s,
-        tFreq: t,
-        hue,
-
-        // curve parameter
-        u: (j / count) * Math.PI * 2 + Math.random() * 0.25,
-
-        // stable angular speed (not beat coupled)
-        w: CFG.baseSpeed * (CFG.shellSpeedMul[s] ?? 1.0) * (0.80 + 0.35 * Math.random()),
-
-        // per-electron phases
-        dx: (Math.random() * 2 - 1) * 0.9,
-        dy: (Math.random() * 2 - 1) * 0.9,
-        dz: Math.random() * Math.PI * 2,
-
-        aspect: CFG.lissaAspectBase * (1 + (Math.random() * 2 - 1) * CFG.lissaAspectJitter),
-
-        plane,
-
-        // smoothed band energy
-        e: 0,
-      });
-
-      g++;
-    }
+function smoothArray(a, k = 0.2) {
+  if (!k) return a;
+  const out = new Float32Array(a.length);
+  let prev = a[0];
+  for (let i = 0; i < a.length; i++) {
+    prev = prev + (a[i] - prev) * (1 - Math.pow(1 - k, 2));
+    out[i] = prev;
   }
+  return out;
 }
 
-/* =======================
-   Lissajous "8"
-======================= */
-function lissajous8(u, dx, dy) {
-  const a = CFG.lissaA;
-  const b = CFG.lissaB;
-  const x = Math.sin(a * u + dx);
-  const y = Math.sin(b * u + dy);
-  return { x, y };
+function lerp(a, b, t) { return a + (b - a) * t; }
+
+function hexToRgba(c, a = 1) {
+  const s = String(c || "").trim();
+  if (s.startsWith("#")) {
+    let r, g, b;
+    if (s.length === 7) { r = parseInt(s.slice(1,3),16); g = parseInt(s.slice(3,5),16); b = parseInt(s.slice(5,7),16); }
+    else if (s.length === 4) { r = parseInt(s[1]+s[1],16); g = parseInt(s[2]+s[2],16); b = parseInt(s[3]+s[3],16); }
+    else return s;
+    return `rgba(${r},${g},${b},${a})`;
+  }
+  return s;
 }
 
-/* =======================
-   Draw
-======================= */
+// =======================
+// Main draw
+// =======================
 function draw(now = 0) {
   if (!VIZ_ENABLED) return;
   if (!analyser) return;
 
+  trackFPS(now);
+
+  const W = __cssW || Math.round(canvas.getBoundingClientRect().width) || 1;
+  const H = __cssH || Math.round(canvas.getBoundingClientRect().height) || 1;
+
   resizeCanvasToDisplaySize();
 
-  const W = __cssW || 1;
-  const H = __cssH || 1;
   const cx = W / 2, cy = H / 2;
   const short = Math.min(W, H);
-  const half = short / 2;
+
+  const bins = CFG.bins;
+  ensureAngleLUT(bins);
+
+  const N = Math.max(120, Math.round(QoS.baseWavePts * QoS.scale));
 
   const dt = lastT ? (now - lastT) / 1000 : 0;
   lastT = now;
+  phase += dt * CFG.rippleSpeed;
 
   analyser.getByteFrequencyData(dataFreq);
-  computeEnergy();
+  analyser.getByteTimeDomainData(dataTime);
+  const { avg, bass } = computeLevels(dataFreq);
 
-  if (!electrons) initElectrons();
+  // ---- Kick detection ----
+  const totalBins = dataFreq.length;
+  const lowEndKick = Math.max(8, Math.floor(totalBins * KICK.bandRatio));
+  let lowSum = 0;
+  for (let i = 0; i < lowEndKick; i++) lowSum += dataFreq[i] / 255;
+  const bassShort = (lowSum / lowEndKick) || 0;
 
-  const ACCENT = getComputedStyle(document.documentElement).getPropertyValue("--accent").trim() || "#bb71f3";
+  const EMA = 0.02;
+  bassMeanLT = (1 - EMA) * bassMeanLT + EMA * bassShort;
 
-  // TRAIL fade (instead of clearRect)
-  ctx.save();
-  ctx.globalCompositeOperation = "source-over";
-  ctx.fillStyle = `${CFG.bgFade}${CFG.trailAlpha})`;
-  ctx.fillRect(0, 0, W, H);
-  ctx.restore();
+  const nowMs = performance.now();
+  const canKick = (nowMs - lastKickT) > KICK.cooldownMs;
+  const overThresh = bassShort > (bassMeanLT * KICK.threshMul);
+  const diffOk = (bassShort - bassMeanLT) > KICK.minDelta;
+  if (canKick && overThresh && diffOk) { kickEnv = 1; lastKickT = nowMs; }
+  else { kickEnv *= KICK.decay; }
 
-  // SAFE ring
-  const progressPad = 12;
-  const electronPad = 20;
-  const shadowPad = 22;
-  const edgePad = progressPad + electronPad + shadowPad + 10;
-  const ring = Math.max(12, half - edgePad);
+  // ---- Volume envelope ----
+  const targetVol = Math.min(1, avg * 0.9 + bass * 0.8);
+  const k = (targetVol > volEnv) ? ATTACK : RELEASE;
+  volEnv = lerp(volEnv, targetVol, k);
 
-  // Shell radii
-  const rMin = ring * CFG.orbitMin;
-  const rMax = ring * CFG.orbitMax;
+  if (bass > bassPeak) bassPeak = bass;
+  else bassPeak *= PEAK_DECAY;
 
-  const shellCount = CFG.shells.length;
-  const shellBase = new Array(shellCount);
-  for (let s = 0; s < shellCount; s++) {
-    const tt = (shellCount <= 1) ? 0 : (s / (shellCount - 1));
-    shellBase[s] = lerp(rMin, rMax, tt);
+  // ---- Center hue ----
+  if (CFG.centerRainbow) {
+    const speed = CFG.centerHueSpeed * (1 + 0.6 * bassPeak);
+    huePhase = (huePhase + speed * dt) % 360;
   }
 
-  // Nucleus (smaller & dimmer)
-  (function drawNucleus(){
-    const r = Math.max(8, short * CFG.nucleusRatio);
+  ctx.clearRect(0, 0, W, H);
+
+  const ACCENT = getComputedStyle(document.documentElement).getPropertyValue("--accent").trim() || "#6da8ff";
+
+  // ==============================
+  // SAFE radius calculation (no clipping)
+  // ==============================
+  const half = short / 2;
+  const maxBar = CFG.barBase + CFG.barGain;
+
+  const progressPad = 18;
+  const barPad = 10;
+  const shadowPad = Math.min(24, QoS.maxShadowBlur);
+  const edgePad = progressPad + barPad + shadowPad + 8;
+
+  const ring = Math.max(10, half - edgePad);
+
+  let radius = ring - CFG.ringOffset;
+  radius = Math.max(10, Math.min(radius, (half - edgePad) - maxBar));
+  if (!isFinite(radius) || radius < 10) radius = Math.max(10, ring * 0.6);
+
+  // =======================
+  // Center blob
+  // =======================
+  (function drawCenterBlob() {
+    const wave = new Float32Array(dataTime.length);
+    for (let i = 0; i < dataTime.length; i++) wave[i] = (dataTime[i] - 128) / 128;
+    const sm = smoothArray(wave, CFG.waveSmooth);
+
+    const base = short * CFG.centerRatio;
+    const beat = Math.min(1.4, 0.6 * volEnv + 1.2 * bassPeak);
+
+    const gain = CFG.centerGain * (beat + KICK.gainMul * kickEnv);
+    const bassPush = CFG.centerBassGain * (0.55 * bass + 0.45 * bassPeak) + (KICK.push * kickEnv);
+
+    const step = sm.length / N;
+
+    const baseHue = CFG.centerRainbow ? (huePhase + CFG.centerHueBassSwing * bassPeak) % 360 : 210;
+    const hue = (baseHue + 180) % 360;
+
+    const centerStroke = `hsl(${hue}, ${CFG.centerSat}%, ${CFG.centerLight + 5}%)`;
+    const centerFill   = `hsla(${hue}, ${CFG.centerSat}%, ${CFG.centerLight}%, 0.85)`;
+    const centerGlow   = `hsl(${hue}, ${CFG.centerSat}%, ${Math.min(70, CFG.centerLight + 15)}%)`;
+
     ctx.save();
     ctx.globalCompositeOperation = "lighter";
-    ctx.globalAlpha = CFG.nucleusAlpha;
+    ctx.globalAlpha = CFG.alphaCenter;
 
-    const grad = ctx.createRadialGradient(cx, cy, r * 0.25, cx, cy, r * 1.10);
-    grad.addColorStop(0.0, "rgba(255,255,255,0.26)");
-    grad.addColorStop(0.4, "rgba(187,113,243,0.10)");
-    grad.addColorStop(1.0, "rgba(0,0,0,0)");
+    ctx.shadowColor = centerGlow;
+    ctx.shadowBlur = Math.min(
+      (CFG.centerGlow * (0.5 + volEnv)) * (1 + KICK.glowBoost * kickEnv * 0.5),
+      QoS.maxShadowBlur
+    );
 
+    const grad = ctx.createRadialGradient(cx, cy, base * 0.18, cx, cy, base + gain + bassPush + 20);
+    grad.addColorStop(0.00, "rgba(255,255,255,0.40)");
+    grad.addColorStop(0.25, centerFill);
+    grad.addColorStop(1.00, "rgba(0,0,0,0)");
     ctx.fillStyle = grad;
-    ctx.shadowColor = ACCENT;
-    ctx.shadowBlur = CFG.nucleusGlow;
 
     ctx.beginPath();
-    ctx.arc(cx, cy, r, 0, Math.PI * 2);
+    for (let i = 0; i < N; i++) {
+      const a = (i / N) * Math.PI * 2;
+      const idx = Math.floor((i * step + phase * 70) % sm.length);
+      const w = sm[idx];
+      const r = base + w * gain + bassPush;
+      const x = cx + Math.cos(a) * r;
+      const y = cy + Math.sin(a) * r;
+      if (i === 0) ctx.moveTo(x, y);
+      else ctx.lineTo(x, y);
+    }
+    ctx.closePath();
     ctx.fill();
+
+    ctx.strokeStyle = centerStroke;
+    ctx.lineWidth = 2.4 + volEnv * 1.8;
+    ctx.stroke();
 
     ctx.restore();
   })();
 
-  // Orbit guide (very subtle)
-  (function drawOrbitGuides(){
+  // =======================
+  // Ripples
+  // =======================
+  (function drawRipples() {
     ctx.save();
     ctx.globalCompositeOperation = "lighter";
-    ctx.lineWidth = 1.2;
 
-    for (let s = 0; s < shellCount; s++) {
-      const rr = shellBase[s];
-      ctx.strokeStyle = `rgba(255,255,255,${CFG.orbitLineAlpha + 0.01 * s})`;
+    const hue = CFG.centerRainbow ? (huePhase + 10) % 360 : null;
+    const rippleColor = (CFG.rippleFollowCenter && CFG.centerRainbow)
+      ? `hsla(${hue}, ${CFG.centerSat}%, ${CFG.centerLight + 10}%, 0.9)`
+      : hexToRgba(ACCENT, 0.9);
+
+    ctx.strokeStyle = rippleColor;
+    ctx.lineWidth = 2.2;
+
+    for (let i = 0; i < CFG.rippleCount; i++) {
+      const baseR = (short * CFG.centerRatio) + i * CFG.rippleGap;
+      const amp   = CFG.rippleAmp * (0.35 + volEnv * 0.65) * (1 + KICK.rippleBoost * kickEnv);
+      const r = baseR + Math.sin(phase * (1 + i * 0.06) + i * 0.9) * amp;
+
+      const dyn = CFG.rippleAlpha * (0.95 - i / (CFG.rippleCount + 1)) * (0.6 + 0.4 * (volEnv + bassPeak));
+      ctx.globalAlpha = CFG.alphaRipples * dyn;
+
       ctx.beginPath();
-      ctx.arc(cx, cy, rr, 0, Math.PI * 2);
+      ctx.arc(cx, cy, r, 0, Math.PI * 2);
+      ctx.stroke();
+    }
+    ctx.restore();
+  })();
+
+  // =======================
+  // Outer rainbow bars (NORMAL: linear mapping)
+  // =======================
+  (function drawBars() {
+    const n = dataFreq.length;
+    const step = n / bins;
+
+    ctx.save();
+    ctx.globalCompositeOperation = "lighter";
+    ctx.globalAlpha = 1;
+
+    for (let i = 0; i < bins; i++) {
+      // linear FFT index sampling
+      const fftIndex = Math.min(n - 1, Math.floor(i * step));
+      const v = dataFreq[fftIndex] / 255; // 0..1
+
+      // mild bass emphasis (optional)
+      const lowWeight = Math.pow(1 - i / bins, 2) * (CFG.bassBoost - 1) + 1;
+      const boosted = Math.min(1, v * lowWeight);
+
+      const bar = CFG.barBase + boosted * CFG.barGain;
+
+      const ang = __angleLUT[i];
+      const x1 = cx + ang.c * radius;
+      const y1 = cy + ang.s * radius;
+      const x2 = cx + ang.c * (radius + bar);
+      const y2 = cy + ang.s * (radius + bar);
+
+      const hue = (i / bins) * 360;
+      const light = 44 + boosted * 42;
+      const color = `hsl(${hue}, 100%, ${light}%)`;
+
+      ctx.strokeStyle = color;
+      ctx.lineWidth = 3.0;
+      ctx.shadowColor = color;
+      ctx.shadowBlur = Math.min(6 + boosted * 30, QoS.maxShadowBlur);
+
+      ctx.beginPath();
+      ctx.moveTo(x1, y1);
+      ctx.lineTo(x2, y2);
       ctx.stroke();
     }
 
     ctx.restore();
   })();
 
-  // Orbital split mix (0..1)
-  const splitMix = clamp01(CFG.splitMixBase + CFG.splitMixGain * beatEnv);
-
-  // Build draw list with depth sort
-  const drawList = [];
-
-  for (let i = 0; i < electrons.length; i++) {
-    const el = electrons[i];
-
-    // band energy
-    const bi = logMapIndex(el.tFreq, dataFreq.length, CFG.freqGamma);
-    const v = dataFreq[bi] / 255;
-    el.e = lerp(el.e, v, 0.20);
-
-    // stable speed
-    el.u += el.w * dt;
-
-    // beat-driven vibration (radial + tangential + z)
-    const n0 = hash01(i * 3.1 + now * 0.0007);
-    const n1 = hash01(i * 7.7 + now * 0.0011);
-    const noise = (n0 * 2 - 1) * CFG.vibNoise + (n1 * 2 - 1) * (1 - CFG.vibNoise);
-
-    const vibR = beatEnv * CFG.vibRadial * Math.sin(el.dz + now * 0.006 + noise);
-    const vibT = beatEnv * CFG.vibTangential * Math.cos(el.dz + now * 0.004 - noise);
-    const vibZ = beatEnv * CFG.vibZ * Math.sin(el.u + el.dz + noise);
-
-    const baseR = shellBase[el.shell];
-    const r = baseR + vibR + el.e * CFG.orbitJitter * (0.25 + 0.75 * Math.sin(now * 0.001 + el.dz));
-
-    // Two orbitals (split): main + phase-shifted
-    // When splitMix>0, we blend a second curve that is rotated (phase offset)
-    const pA = lissajous8(el.u, el.dx, el.dy);
-    const pB = lissajous8(el.u + CFG.splitPhase, el.dx, el.dy);
-
-    // Interpolate between curves: gives "orbital splitting" under beat
-    const x0 = pA.x, y0 = pA.y;
-    const x1 = pB.x, y1 = pB.y;
-
-    // splitStrength makes the second lobe separate more instead of simple blend
-    const sx = lerp(x0, x1 * (1 + CFG.splitStrength), splitMix);
-    const sy = lerp(y0, y1 * (1 + CFG.splitStrength), splitMix);
-
-    // Apply aspect
-    const lx = sx * el.aspect;
-    const ly = sy * (2.0 - el.aspect) * 0.92;
-
-    // Base local point
-    let px = lx * r;
-    let py = ly * r;
-
-    // Tangential jitter (rotate 90° in local space)
-    px += -ly * vibT;
-    py +=  lx * vibT;
-
-    // Pseudo-z combines curve position + vibZ
-    let pz = Math.sin(el.u + el.dz) * 0.95 + vibZ;
-
-    // Plane tilt
-    px += pz * el.plane.tiltX * r * 0.35;
-    py += pz * el.plane.tiltY * r * 0.35;
-
-    // Depth normalize
-    const zN = clamp01((pz * CFG.zDepth + 1) * 0.5);
-    const scale = lerp(CFG.zScaleMin, CFG.zScaleMax, zN);
-    const alphaZ = lerp(CFG.zAlphaMin, CFG.zAlphaMax, zN);
-
-    // Perspective
-    const X = cx + px;
-    const Y = cy + py + (zN - 0.5) * CFG.zTiltY * r;
-
-    drawList.push({ el, X, Y, zN, scale, alphaZ });
-  }
-
-  drawList.sort((a, b) => a.zN - b.zN);
-
-  // Draw electrons: probability cloud + core dot + small tail
-  ctx.save();
-  ctx.globalCompositeOperation = "lighter";
-
-  for (let k = 0; k < drawList.length; k++) {
-    const it = drawList[k];
-    const el = it.el;
-
-    const hue = ((el.hue % 360) + 360) % 360;
-
-    // brightness follows energy + beat pop + depth
-    const light = 32 + el.e * 54 + beatEnv * 12 + it.zN * 8;
-
-    // alpha follows energy + beat + depth alpha
-    const alphaBase = clamp01((0.10 + el.e * 0.75 + beatEnv * 0.22) * it.alphaZ);
-
-    // Cloud spread grows with beat + energy (uncertainty)
-    const spread =
-      (CFG.cloudSpread + CFG.cloudEnergyGain * el.e + CFG.cloudBeatGain * beatEnv) * it.scale;
-
-    // 1) Probability cloud (multiple samples around the mean)
-    // Use deterministic gaussian-ish offsets so it shimmers but not flickery.
-    const samples = CFG.cloudSamples;
-    for (let s = 0; s < samples; s++) {
-      const w = CFG.cloudKernel[s] ?? CFG.cloudKernel[CFG.cloudKernel.length - 1] ?? 0.12;
-
-      const gx = gauss01(k * 11.3 + s * 3.7 + now * 0.0009, k * 2.1 + s * 9.1 + now * 0.0013);
-      const gy = gauss01(k * 5.9  + s * 1.6 + now * 0.0011, k * 8.2 + s * 6.4 + now * 0.0008);
-
-      const dx = gx * spread;
-      const dy = gy * spread;
-
-      const a = alphaBase * CFG.cloudAlpha * w;
-      if (a <= 0.001) continue;
-
-      const cloudColor = `hsla(${hue}, 100%, ${light}%, ${a})`;
-      ctx.fillStyle = cloudColor;
-      ctx.shadowColor = cloudColor;
-      ctx.shadowBlur = Math.min(22, 6 + CFG.glowMax * el.e + 10 * beatEnv);
-
-      const r = (1.2 + 1.6 * el.e + 0.8 * beatEnv) * it.scale * (0.85 + 0.25 * it.zN);
-      ctx.beginPath();
-      ctx.arc(it.X + dx, it.Y + dy, r, 0, Math.PI * 2);
-      ctx.fill();
-    }
-
-    // 2) Electron "core" point
-    const coreAlpha = clamp01(alphaBase * 0.95);
-    const coreColor = `hsla(${hue}, 100%, ${light + 6}%, ${coreAlpha})`;
-    ctx.fillStyle = coreColor;
-    ctx.shadowColor = coreColor;
-    ctx.shadowBlur = Math.min(22, 8 + CFG.glowMax * el.e + 14 * beatEnv + 6 * it.zN);
-
-    const size = (CFG.electronBaseSize + CFG.electronSizeGain * el.e + 2.0 * beatEnv) * it.scale;
-    ctx.beginPath();
-    ctx.arc(it.X, it.Y, size, 0, Math.PI * 2);
-    ctx.fill();
-
-    // 3) Small tail (direction from local tangent using forward sample)
-    const u2 = el.u + 0.04;
-    const p1 = lissajous8(el.u, el.dx, el.dy);
-    const p2 = lissajous8(u2,   el.dx, el.dy);
-    let tx = (p2.x - p1.x);
-    let ty = (p2.y - p1.y);
-    const tlen = Math.hypot(tx, ty) || 1;
-    tx /= tlen; ty /= tlen;
-
-    const tail = (CFG.tailBase + CFG.tailGain * el.e + 24 * beatEnv) * it.scale * (0.85 + 0.35 * it.zN);
-    ctx.lineWidth = 2.0 * it.scale;
-
-    const tailA = clamp01((0.06 + 0.45 * el.e + 0.35 * beatEnv) * it.alphaZ);
-    ctx.strokeStyle = `hsla(${hue}, 100%, ${light}%, ${tailA})`;
-    ctx.shadowColor = coreColor;
-    ctx.shadowBlur = Math.min(18, 6 + 10 * beatEnv);
-
-    ctx.beginPath();
-    ctx.moveTo(it.X, it.Y);
-    ctx.lineTo(it.X + tx * tail, it.Y + ty * tail);
-    ctx.stroke();
-  }
-
-  ctx.restore();
-
-  // Progress ring (thin & dim)
-  (function drawProgress(){
+  // =======================
+  // Progress arc ring (SAFE)
+  // =======================
+  (function drawProgress() {
     const d = audio.duration || 0;
     const ct = audio.currentTime || 0;
     const p = d > 0 ? (ct / d) : 0;
@@ -571,21 +478,20 @@ function draw(now = 0) {
     const e = s + p * Math.PI * 2;
 
     ctx.save();
-    ctx.globalCompositeOperation = "source-over";
-    ctx.strokeStyle = `rgba(255,255,255,${CFG.progressAlphaBg})`;
-    ctx.lineWidth = CFG.progressWidthBg;
+    ctx.strokeStyle = "rgba(255,255,255,0.25)";
+    ctx.lineWidth = 14;
     ctx.beginPath();
     ctx.arc(cx, cy, ring, 0, Math.PI * 2);
     ctx.stroke();
     ctx.restore();
 
     ctx.save();
-    ctx.globalCompositeOperation = "lighter";
-    ctx.strokeStyle = `rgba(187,113,243,${CFG.progressAlphaFg})`;
-    ctx.lineWidth = CFG.progressWidthFg;
+    ctx.strokeStyle = ACCENT;
+    ctx.lineWidth = 12;
     ctx.lineCap = "round";
     ctx.shadowColor = ACCENT;
-    ctx.shadowBlur = CFG.progressGlow;
+    ctx.shadowBlur = Math.min(25, QoS.maxShadowBlur);
+    ctx.globalAlpha = 0.95;
     ctx.beginPath();
     ctx.arc(cx, cy, ring, s, e, false);
     ctx.stroke();
@@ -595,9 +501,9 @@ function draw(now = 0) {
   rafId = requestAnimationFrame(draw);
 }
 
-/* =======================
-   Events
-======================= */
+// =======================
+// Events
+// =======================
 window.addEventListener("resize", () => {
   if (audioCtx) resizeCanvasToDisplaySize();
 }, { passive: true });
@@ -618,5 +524,5 @@ audio.addEventListener("play", () => {
   if (audioCtx && audioCtx.state === "suspended") audioCtx.resume();
   if (rafId) cancelAnimationFrame(rafId);
   lastT = 0;
-  draw(0);
+  draw();
 });

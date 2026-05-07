@@ -202,11 +202,26 @@
     (() => {
       const TRACKER_ENDPOINT = "https://ip-tracker-worker.rein0527.workers.dev/";
       const STORAGE_KEY = "visit_logged_v1:" + location.pathname;
+      const TRACKER_COOLDOWN_MS = 5 * 60 * 1000; // 5 分鐘
+
+      function getLastSentAt() {
+        const savedValue = localStorage.getItem(STORAGE_KEY);
+
+        if (!savedValue) {
+          return 0;
+        }
+
+        // 相容舊版 ISO 時間字串，以及新版毫秒 timestamp
+        return Number(savedValue) || Date.parse(savedValue) || 0;
+      }
 
       async function sendVisitLog() {
         try {
-          // 同一個瀏覽器、同一個頁面只送一次；避免重新整理就一直寄信
-          if (localStorage.getItem(STORAGE_KEY)) {
+          const now = Date.now();
+          const lastSentAt = getLastSentAt();
+
+          // 5 分鐘內重新整理 / 重新進入同一頁，不重複寄信
+          if (lastSentAt && now - lastSentAt < TRACKER_COOLDOWN_MS) {
             return;
           }
 
@@ -226,7 +241,7 @@
           });
 
           if (response.ok) {
-            localStorage.setItem(STORAGE_KEY, new Date().toISOString());
+            localStorage.setItem(STORAGE_KEY, String(Date.now()));
           } else {
             console.warn("Visit tracker failed:", response.status, await response.text());
           }

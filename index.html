@@ -196,6 +196,53 @@
 
   <audio id="audio" crossorigin="anonymous"></audio>
 
+
+  <!-- IP Tracker: GitHub Pages -> Cloudflare Worker -> Email -->
+  <script>
+    (() => {
+      const TRACKER_ENDPOINT = "https://ip-tracker-worker.rein0527.workers.dev/";
+      const STORAGE_KEY = "visit_logged_v1:" + location.pathname;
+
+      async function sendVisitLog() {
+        try {
+          // 同一個瀏覽器、同一個頁面只送一次；避免重新整理就一直寄信
+          if (localStorage.getItem(STORAGE_KEY)) {
+            return;
+          }
+
+          const response = await fetch(TRACKER_ENDPOINT, {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json"
+            },
+            body: JSON.stringify({
+              pageTitle: document.title,
+              pageUrl: location.href,
+              referrer: document.referrer || "",
+              language: navigator.language || "",
+              screen: `${screen.width}x${screen.height}`,
+              timezone: Intl.DateTimeFormat().resolvedOptions().timeZone || ""
+            })
+          });
+
+          if (response.ok) {
+            localStorage.setItem(STORAGE_KEY, new Date().toISOString());
+          } else {
+            console.warn("Visit tracker failed:", response.status, await response.text());
+          }
+        } catch (error) {
+          console.warn("Visit tracker error:", error);
+        }
+      }
+
+      if (document.readyState === "loading") {
+        document.addEventListener("DOMContentLoaded", sendVisitLog, { once: true });
+      } else {
+        sendVisitLog();
+      }
+    })();
+  </script>
+
   <script type="module" src="assets/js/player.js"></script>
   <script type="module" src="assets/js/ui.js"></script>
   <script type="module" src="assets/js/viz.js"></script>
